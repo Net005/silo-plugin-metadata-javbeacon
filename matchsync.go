@@ -75,12 +75,8 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			offset = 0
 		}
 		for i := offset; i < len(items); i++ {
-			if ctx.Err() != nil || shortDeadline(ctx) {
-				s.mu.Lock()
-				s.matchCursor = cursor
-				s.matchOffset = i
-				s.mu.Unlock()
-				return map[string]any{"status": "partial", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": true}, nil
+			if ctx.Err() != nil || shortDeadline(ctx) || matched >= 40 {
+				return s.matchPartial(cursor, i, matched, skipped, failed, pages, "batch_limit")
 			}
 			item := items[i]
 			if item.ContentType != "" && item.ContentType != "movie" {
@@ -89,6 +85,9 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			}
 			providerID, ok, err := s.exactProviderIDForItem(ctx, siloClient, item)
 			if err != nil {
+				if strings.Contains(err.Error(), "HTTP 429") {
+					return s.matchPartial(cursor, i, matched, skipped, failed, pages, "rate_limited")
+				}
 				failed++
 				log.Warn("auto-match lookup failed", "content_id", item.ContentID, "err", err)
 				continue
@@ -98,6 +97,9 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 				continue
 			}
 			if err := siloClient.ApplyMatch(ctx, item.ContentID, item.LibraryID, providerID); err != nil {
+				if strings.Contains(err.Error(), "HTTP 429") {
+					return s.matchPartial(cursor, i, matched, skipped, failed, pages, "rate_limited")
+				}
 				failed++
 				log.Warn("auto-match apply failed", "content_id", item.ContentID, "err", err)
 				continue
@@ -284,4 +286,12 @@ func completenessScore(m provider.Metadata) int {
 func shortDeadline(ctx context.Context) bool {
 	deadline, ok := ctx.Deadline()
 	return ok && time.Until(deadline) < 1500*time.Millisecond
+}
+
+func (s *collectionSyncTaskServer) matchPartial(cursor string, offset, matched, skipped, failed, pages int, reason string) (map[string]any, error) {
+	s.mu.Lock()
+	s.matchCursor = cursor
+	s.matchOffset = offset
+	s.mu.Unlock()
+	return map[string]any{"status": "partial", "reason": reason, "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": true}, nil
 }

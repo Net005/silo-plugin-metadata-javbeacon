@@ -44,16 +44,20 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 	return hclog.NewNullLogger()
 }
 
+func canonicalTaskKey(key string) string {
+	if key == "match-unmatched" || strings.HasSuffix(key, ":match-unmatched") {
+		return "match-unmatched"
+	}
+	return "collection-sync"
+}
+
 // Run dispatches on task_key, since Silo's plugin SDK exposes only one
 // ScheduledTask service per plugin process - the manifest declares each
 // scheduled_task.v1 capability as a separate id, and Silo passes that id back
 // as task_key on every Run call. Anything other than "match-unmatched" (an
 // empty key, or the id "collection-sync") runs collection reconciliation.
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
-	taskKey := req.GetTaskKey()
-	if taskKey != "match-unmatched" {
-		taskKey = "collection-sync"
-	}
+	taskKey := canonicalTaskKey(req.GetTaskKey())
 	s.mu.Lock()
 	if s.running == nil {
 		s.running = make(map[string]bool)

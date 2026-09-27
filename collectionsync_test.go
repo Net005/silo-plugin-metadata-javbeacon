@@ -20,3 +20,11 @@ func TestCollectionSpecsPreserveSourceOrderAndStashFallback(t *testing.T) {
 		t.Fatalf("preset=%v", specs[1])
 	}
 }
+
+func TestCanonicalTaskKey(t *testing.T) {
+	for input, want := range map[string]string{"match-unmatched": "match-unmatched", "plugin:5:match-unmatched": "match-unmatched", "collection-sync": "collection-sync", "plugin:5:collection-sync": "collection-sync"} {
+		if got := canonicalTaskKey(input); got != want {
+			t.Errorf("%q => %q, want %q", input, got, want)
+		}
+	}
+}

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.16] - 2026-09-27
+
+### Fixed
+
+- Route Silo fully qualified task keys to the correct scheduled task. Stop auto-match batches at 40 matches or when Silo rate limits requests, preserving the cursor for the next run.
+
 ## [0.4.15] - 2026-09-27
 
 ### Fixed
