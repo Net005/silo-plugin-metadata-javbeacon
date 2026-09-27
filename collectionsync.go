@@ -58,37 +58,84 @@ func canonicalTaskKey(key string) string {
 // scheduled_task.v1 capability as a separate id, and Silo passes that id back
 // as task_key on every Run call. Anything other than "match-unmatched" (an
 // empty key, or the id "collection-sync") runs collection reconciliation.
+type collectionSyncResult struct {
+	summary map[string]any
+	err     error
+}
+
+func (s *collectionSyncTaskServer) startCollectionSync() (<-chan collectionSyncResult, bool) {
+	s.mu.Lock()
+	if s.running == nil {
+		s.running = make(map[string]bool)
+	}
+	if s.running["collection-sync"] {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.running["collection-sync"] = true
+	s.mu.Unlock()
+	done := make(chan collectionSyncResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		summary, err := s.sync(ctx)
+		if err != nil {
+			s.logger().Error("collection sync failed", "err", err)
+		}
+		done <- collectionSyncResult{summary, err}
+		s.mu.Lock()
+		delete(s.running, "collection-sync")
+		s.mu.Unlock()
+	}()
+	return done, true
+}
+
+// Silo's scheduled-task RPC has a hard ten-second control deadline even when
+// a trigger advertises thirty seconds. Let the resident worker finish the
+// sync and return its result when quick; otherwise report that it continues.
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := canonicalTaskKey(req.GetTaskKey())
+	if taskKey == "collection-sync" {
+		done, started := s.startCollectionSync()
+		if !started {
+			return taskOutput(map[string]any{"status": "running"})
+		}
+		timer := time.NewTimer(8 * time.Second)
+		defer timer.Stop()
+		select {
+		case result := <-done:
+			if result.err != nil {
+				return nil, result.err
+			}
+			return taskOutput(result.summary)
+		case <-timer.C:
+			return taskOutput(map[string]any{"status": "running", "detail": "Collection and watched-state sync continues in the background"})
+		case <-ctx.Done():
+			return taskOutput(map[string]any{"status": "running"})
+		}
+	}
 	s.mu.Lock()
 	if s.running == nil {
 		s.running = make(map[string]bool)
 	}
 	if s.running[taskKey] {
 		s.mu.Unlock()
-		output, _ := structpb.NewStruct(map[string]any{"status": "already_running"})
-		return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
+		return taskOutput(map[string]any{"status": "already_running"})
 	}
 	s.running[taskKey] = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-	budget := 20 * time.Second
-	if taskKey == "collection-sync" {
-		budget = 25 * time.Second
-	}
-	workCtx, cancel := context.WithTimeout(ctx, budget)
+	workCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	var summary map[string]any
-	var err error
-	if taskKey == "match-unmatched" {
-		summary, err = s.matchUnmatched(workCtx)
-	} else {
-		summary, err = s.sync(workCtx)
-	}
+	summary, err := s.matchUnmatched(workCtx)
 	if err != nil {
 		s.logger().Error("scheduled task failed", "task_key", taskKey, "err", err)
 		return nil, err
 	}
+	return taskOutput(summary)
+}
+
+func taskOutput(summary map[string]any) (*pluginv1.RunScheduledTaskResponse, error) {
 	output, err := structpb.NewStruct(summary)
 	if err != nil {
 		return nil, err
@@ -99,29 +146,8 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 func (s *collectionSyncTaskServer) poll() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	// Configure can precede the RuntimeHost broker binding; the first tick retries.
 	for range ticker.C {
-		s.mu.Lock()
-		if s.running == nil {
-			s.running = make(map[string]bool)
-		}
-		busy := s.running["collection-sync"]
-		if !busy {
-			s.running["collection-sync"] = true
-		}
-		s.mu.Unlock()
-		if busy {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		_, err := s.sync(ctx)
-		cancel()
-		if err != nil {
-			s.logger().Warn("collection poll failed", "err", err)
-		}
-		s.mu.Lock()
-		delete(s.running, "collection-sync")
-		s.mu.Unlock()
+		s.startCollectionSync()
 	}
 }
 
@@ -141,12 +167,16 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	}
 	client := provider.NewSiloClient(baseURL, key)
 	var specs []provider.CollectionSpec
+	var catalog []provider.CatalogItem
+	var profileID string
+	var codes map[int64]string
+	watchedChanged, watchedComplete := 0, true
 	if libraryID != "" {
-		catalog, err := client.ListLibraryCatalog(ctx, libraryID)
+		catalog, profileID, err = client.ListLibraryCatalogForProfile(ctx, libraryID)
 		if err != nil {
 			return nil, err
 		}
-		codes := snapshot.ReleaseCodes
+		codes = snapshot.ReleaseCodes
 		if codes == nil {
 			codes, err = s.runtime.provider.LocalReleaseCodes(ctx)
 			if err != nil {
@@ -165,18 +195,64 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		}
 		specs = collectionSpecs(snapshot, media)
 	}
-	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 120)
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
-			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed}, nil
+			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": watchedChanged}, nil
 		}
 		return map[string]any{"status": "error", "error": err.Error()}, err
 	}
-	if !complete {
-		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed}, nil
+	if libraryID != "" {
+		watchedChanged, watchedComplete, err = syncWatchedCatalog(ctx, client, profileID, snapshot, catalog, codes, 400)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !complete || !watchedComplete {
+		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed, "watched_changes": watchedChanged}, nil
 	}
 	s.runtime.provider.SetLastSyncedRevision(snapshot.Revision)
-	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed}, nil
+	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed, "watched_changes": watchedChanged}, nil
+}
+
+func syncItemCode(entry provider.LibrarySyncItem, codes map[int64]string) string {
+	if strings.TrimSpace(entry.Path) != "" {
+		code := strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
+		if code != "" && code != "." {
+			return code
+		}
+	}
+	return codes[entry.ReleaseID]
+}
+
+// Silo's generic watch-provider importer only accepts TMDB/IMDb/TVDB IDs.
+// JAV releases have none, so apply the authoritative watched flag to local
+// catalog members directly. Existing played flags prevent repeated writes.
+func syncWatchedCatalog(ctx context.Context, client *provider.SiloClient, profileID string, snapshot *provider.LibrarySync, catalog []provider.CatalogItem, codes map[int64]string, limit int) (int, bool, error) {
+	wanted := map[string]bool{}
+	for _, entry := range snapshot.Watched {
+		code := syncItemCode(entry, codes)
+		if code != "" {
+			wanted[normalizedCatalogCode(code)] = true
+		}
+	}
+	changed := 0
+	for _, item := range catalog {
+		if item.Type != "movie" || item.ContentID == "" || item.UserState.Played || !wanted[normalizedCatalogCode(item.Title)] {
+			continue
+		}
+		if limit > 0 && changed >= limit {
+			return changed, false, nil
+		}
+		if err := client.MarkWatched(ctx, profileID, item.ContentID); err != nil {
+			if strings.Contains(err.Error(), "HTTP 429") {
+				return changed, false, nil
+			}
+			return changed, false, err
+		}
+		changed++
+	}
+	return changed, true, nil
 }
 
 func listJAVMedia(ctx context.Context, host *runtimehost.Client) ([]runtimehost.CatalogMediaItem, error) {
@@ -292,10 +368,7 @@ func collectionSpecsFromCatalog(snapshot *provider.LibrarySync, catalog []provid
 	watch := []string{}
 	seen := map[string]bool{}
 	for _, entry := range snapshot.Watchlist {
-		code := strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
-		if code == "" && entry.ReleaseID > 0 {
-			code = codes[entry.ReleaseID]
-		}
+		code := syncItemCode(entry, codes)
 		watch = appendUnique(watch, seen, code)
 	}
 	specs := []provider.CollectionSpec{{Kind: "watchlist", Name: "Watchlist", LibraryID: libraryID, MediaIDs: watch}}

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.25] - 2026-09-27
+
+### Fixed
+
+- Continue collection reconciliation in the resident worker when Silo's hard 10-second scheduled-task RPC expires. The task returns a running status while the one-minute poll keeps updates moving; each pass can reconcile up to 400 changes.
+- Mark matching local Silo items watched from the Stash/JAVBeacon snapshot, skipping items already played. Silo's generic watch-provider importer cannot match JAVBeacon/Stash provider IDs, so stop advertising inbound watch import there; active playback scrobbling remains enabled.
+- Match Watchlist entries by release code when a snapshot entry has no file path.
+
 ## [0.4.24] - 2026-09-27
 
 ### Fixed

@@ -27,17 +27,7 @@ Silo's plugin SDK (v0.15.0) actually allows:
   matching, or a future scan-source capability) attaches a `stash` external
   id to a library item that has no `javbeacon` one. Stash-only scene matches
   use this path when no local JAVBeacon release exists.
-- **Watched/watchlist import** - `ListRemoteState` reports existing
-  watched state (StashApp play_count > 0) and StashApp's configured Watchlist
-  scene tag back to Silo, newest scene update first, so a freshly matched Silo library item inherits history that already
-  exists in JAVBeacon instead of starting from zero. This is the opposite
-  direction from playback reporting above (JAVBeacon -> Silo, not Silo ->
-  JAVBeacon) and always returns a full, authoritative snapshot in one page
-  (`complete_snapshot=true`) rather than an incremental delta, since a
-  self-hosted single-user library is always small enough to send in full.
-  JAVBeacon has no "favorites" concept distinct from its watchlist, and no
-  resume/progress position in this snapshot, so those two state kinds are
-  never populated.
+- **Watched state in Silo** - the resident collection worker compares StashApp's watched snapshot with local Silo catalog items and marks only unplayed matches watched for the primary profile. Silo's generic watch-provider importer cannot match JAVBeacon/Stash IDs (it only accepts TMDB/IMDb/TVDB), so import is no longer advertised there. Existing playback events continue to flow from Silo to JAVBeacon/StashApp through the watch provider. Historical play counts and timestamps cannot be imported through Silo's watched API.
 - **Silo collections** - the StashApp Watchlist and each JAVBeacon saved filter set become real, ordered Silo collections in each matched library. Watchlist follows the StashApp scene update order (newest first); saved filter sets follow JAVBeacon's resolved order. Only items present in the local Silo library are included. Collection artwork rotates every six hours from those members, usually favoring recent releases while sometimes showing older ones. A one-minute background poll applies changes, and the `collection-sync` scheduled task provides a manual and scheduled reconciliation path. The plugin owns only collections bearing its stable slug and description marker.
 - **Stash metadata/image gap-fill** - as of JAVBeacon v1.0.239, served by
   JAVBeacon's own dedicated `internal/silo.Service` (previously this reused

@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -64,8 +64,8 @@
           "WATCH_SYNC_AUTH_METHOD_API_KEY"
         ],
         "export_watched": true,
-        "import_watched": true,
-        "import_watchlist": true,
+        "import_watched": false,
+        "import_watchlist": false,
         "scrobble_playback": true,
         "supported_media_types": [
           "WATCH_SYNC_MEDIA_TYPE_MOVIE"
@@ -80,7 +80,7 @@
       "type": "scheduled_task.v1",
       "id": "collection-sync",
       "display_name": "Sync JAVBeacon collections",
-      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background and can be scheduled as a safety pass."
+      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background, also applies watched flags to local Silo items, and can be scheduled as a safety pass."
     },
     {
       "type": "scheduled_task.v1",
