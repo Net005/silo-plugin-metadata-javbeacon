@@ -130,9 +130,16 @@ func (c *SiloClient) collectionMembers(ctx context.Context, id string) (map[stri
 // SyncCollections owns only collections carrying its stable slug and
 // marker. Existing user collections, even with the same title, are untouched.
 func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec) (int, error) {
+	changed, _, err := c.SyncCollectionsBatch(ctx, specs, 0)
+	return changed, err
+}
+
+// SyncCollectionsBatch limits writes per invocation so Silo scheduled tasks
+// can resume safely instead of exceeding the task RPC deadline or API quota.
+func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []CollectionSpec, maxChanges int) (int, bool, error) {
 	existing, err := c.collections(ctx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	bySlug := map[string]siloCollection{}
 	for _, item := range existing {
@@ -165,7 +172,7 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 		spec := desired[slug]
 		collection, exists := bySlug[slug]
 		if exists && (!strings.HasPrefix(collection.Description, collectionOwner) || collection.LibraryID != spec.LibraryID) {
-			return changed, fmt.Errorf("silo: collection slug %q belongs to another owner", slug)
+			return changed, false, fmt.Errorf("silo: collection slug %q belongs to another owner", slug)
 		}
 		if !exists {
 			if spec.Name == "" {
@@ -173,13 +180,16 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 			}
 			payload := map[string]any{"title": spec.Name, "slug": slug, "collection_type": "manual", "library_id": spec.LibraryID, "description": collectionOwner + " " + spec.Kind + " ID: " + strconv.FormatInt(spec.PresetID, 10)}
 			if err := c.collectionRequest(ctx, http.MethodPost, "/api/v2/admin/collections", payload, &collection); err != nil {
-				return changed, err
+				return changed, false, err
 			}
 			changed++
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
 		}
 		members, err := c.collectionMembers(ctx, collection.ID)
 		if err != nil {
-			return changed, err
+			return changed, false, err
 		}
 		want := map[string]bool{}
 		ordered := []string{}
@@ -195,9 +205,12 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 			}
 			path := "/api/v2/admin/collections/" + url.PathEscape(collection.ID) + "/items/" + url.PathEscape(mediaID)
 			if err := c.collectionRequest(ctx, http.MethodPut, path, map[string]int{"position": position}, nil); err != nil {
-				return changed, err
+				return changed, false, err
 			}
 			changed++
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
 		}
 		for mediaID := range members {
 			if want[mediaID] {
@@ -205,9 +218,12 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 			}
 			path := "/api/v2/admin/collections/" + url.PathEscape(collection.ID) + "/items/" + url.PathEscape(mediaID)
 			if err := c.collectionRequest(ctx, http.MethodDelete, path, nil, nil); err != nil {
-				return changed, err
+				return changed, false, err
 			}
 			changed++
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
 		}
 		needsOrder := len(ordered) > 0
 		if len(members) == len(ordered) {
@@ -224,16 +240,16 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 			var current json.RawMessage
 			etag, err := c.collectionRequestETag(ctx, http.MethodGet, path, nil, &current, "")
 			if err != nil {
-				return changed, err
+				return changed, false, err
 			}
 			if etag == "" {
-				return changed, fmt.Errorf("silo: collection order ETag is missing")
+				return changed, false, fmt.Errorf("silo: collection order ETag is missing")
 			}
 			if _, err := c.collectionRequestETag(ctx, http.MethodPut, path, map[string]any{"ordered_ids": ordered}, nil, etag); err != nil {
-				return changed, err
+				return changed, false, err
 			}
 		}
 
 	}
-	return changed, nil
+	return changed, true, nil
 }

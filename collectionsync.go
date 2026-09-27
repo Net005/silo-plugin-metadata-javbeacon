@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,30 +126,46 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	host := sdkruntime.Host()
-	if host == nil {
-		return nil, fmt.Errorf("collection-sync: runtime host is not bound")
-	}
 	key := s.runtime.provider.SiloAPIKey()
 	if key == "" {
 		return map[string]any{"status": "skipped", "reason": "Silo API key is not configured"}, nil
 	}
 	baseURL := s.runtime.provider.SiloBaseURL()
+	libraryID := s.runtime.provider.SiloLibraryID()
 	if baseURL == "" {
-		hostInfo, err := host.GetHostInfo(ctx)
+		return nil, fmt.Errorf("collection-sync: Silo URL is required")
+	}
+	client := provider.NewSiloClient(baseURL, key)
+	var specs []provider.CollectionSpec
+	if libraryID != "" {
+		catalog, err := client.ListLibraryCatalog(ctx, libraryID)
 		if err != nil {
 			return nil, err
 		}
-		baseURL = hostInfo.InternalBaseURL
+		specs, err = collectionSpecsFromCatalog(ctx, snapshot, catalog, s.runtime.provider, libraryID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		host := sdkruntime.Host()
+		if host == nil {
+			return nil, fmt.Errorf("collection-sync: Silo library ID is required")
+		}
+		media, err := listJAVMedia(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		specs = collectionSpecs(snapshot, media)
 	}
-	media, err := listJAVMedia(ctx, host)
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 40)
 	if err != nil {
-		return nil, err
-	}
-	specs := collectionSpecs(snapshot, media)
-	changed, err := provider.NewSiloClient(baseURL, key).SyncCollections(ctx, specs)
-	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 429") {
+			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed}, nil
+		}
 		return map[string]any{"status": "error", "error": err.Error()}, err
+	}
+	if !complete {
+		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed}, nil
 	}
 	s.runtime.provider.SetLastSyncedRevision(snapshot.Revision)
 	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed}, nil
@@ -229,4 +247,69 @@ func collectionSpecs(snapshot *provider.LibrarySync, media []runtimehost.Catalog
 		}
 	}
 	return specs
+}
+
+var siloCodePattern = regexp.MustCompile(`(?i)^([a-z]{2,12})[-_ ]*0*([0-9]{1,6})$`)
+
+func normalizedCatalogCode(raw string) string {
+	name := strings.TrimSpace(raw)
+	if match := siloCodePattern.FindStringSubmatch(name); len(match) == 3 {
+		number, _ := strconv.Atoi(match[2])
+		return strings.ToUpper(match[1]) + "-" + strconv.Itoa(number)
+	}
+	return strings.ToLower(name)
+}
+
+// collectionSpecsFromCatalog maps JAVBeacon's ordered source snapshot to
+// items that actually exist in the configured Silo library. Unmatched local
+// items remain eligible; the catalog is the source of local existence.
+func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibrarySync, catalog []provider.CatalogItem, p *provider.Provider, libraryID string) ([]provider.CollectionSpec, error) {
+	byCode := map[string][]string{}
+	for _, item := range catalog {
+		if item.ContentID == "" || item.Type != "movie" {
+			continue
+		}
+		code := normalizedCatalogCode(item.Title)
+		byCode[code] = append(byCode[code], item.ContentID)
+	}
+	appendUnique := func(dst []string, seen map[string]bool, code string) []string {
+		for _, id := range byCode[normalizedCatalogCode(code)] {
+			if !seen[id] {
+				dst = append(dst, id)
+				seen[id] = true
+			}
+		}
+		return dst
+	}
+	watch := []string{}
+	seen := map[string]bool{}
+	for _, entry := range snapshot.Watchlist {
+		code := strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
+		if code == "" && entry.ReleaseID > 0 {
+			metadata, err := p.GetMetadata(ctx, entry.ReleaseID)
+			if err != nil {
+				return nil, err
+			}
+			if metadata != nil {
+				code = metadata.Code
+			}
+		}
+		watch = appendUnique(watch, seen, code)
+	}
+	specs := []provider.CollectionSpec{{Kind: "watchlist", Name: "Watchlist", LibraryID: libraryID, MediaIDs: watch}}
+	for _, preset := range snapshot.FilterPresets {
+		ids := []string{}
+		seen = map[string]bool{}
+		for _, releaseID := range preset.ReleaseIDs {
+			metadata, err := p.GetMetadata(ctx, releaseID)
+			if err != nil {
+				return nil, err
+			}
+			if metadata != nil {
+				ids = appendUnique(ids, seen, metadata.Code)
+			}
+		}
+		specs = append(specs, provider.CollectionSpec{Kind: "preset", PresetID: preset.ID, Name: preset.Name, LibraryID: libraryID, MediaIDs: ids})
+	}
+	return specs, nil
 }

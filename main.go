@@ -72,7 +72,7 @@ func (s *runtimeServer) Configure(_ context.Context, req *pluginv1.ConfigureRequ
 				APIKey:  stringValue(values["api_key"]),
 			})
 		case "silo_sync":
-			s.provider.ConfigureSiloConnection(stringValue(values["silo_base_url"]), stringValue(values["silo_api_key"]))
+			s.provider.ConfigureSiloConnection(stringValue(values["silo_base_url"]), stringValue(values["silo_library_id"]), stringValue(values["silo_api_key"]))
 		}
 	}
 	if s.collectionSync != nil {

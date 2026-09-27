@@ -25,11 +25,12 @@ type Config struct {
 // enters them, so this plugin must actually implement Configure rather than
 // treat it as a no-op.
 type Provider struct {
-	mu           sync.RWMutex
-	client       *Client
-	siloAPIKey   string
-	siloBaseURL  string
-	lastSyncedAt string
+	mu            sync.RWMutex
+	client        *Client
+	siloAPIKey    string
+	siloBaseURL   string
+	siloLibraryID string
+	lastSyncedAt  string
 }
 
 // NewProvider returns an unconfigured provider. Every RPC returns a clear
@@ -50,11 +51,12 @@ func (p *Provider) Configure(cfg Config) {
 // separate credential from the JAVBeacon connection above, since it
 // authenticates to Silo itself rather than to JAVBeacon. See the "silo_sync"
 // global config entry in manifest.json.
-func (p *Provider) ConfigureSiloConnection(baseURL, key string) {
+func (p *Provider) ConfigureSiloConnection(baseURL, libraryID, key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.siloAPIKey = key
 	p.siloBaseURL = baseURL
+	p.siloLibraryID = libraryID
 }
 
 // SiloBaseURL is the configured admin API endpoint. It avoids a callback to
@@ -63,6 +65,12 @@ func (p *Provider) SiloBaseURL() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.siloBaseURL
+}
+
+func (p *Provider) SiloLibraryID() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.siloLibraryID
 }
 
 // SiloAPIKey returns the currently configured Silo API key, or "" if none has

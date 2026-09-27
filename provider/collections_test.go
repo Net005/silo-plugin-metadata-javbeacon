@@ -107,4 +107,13 @@ func TestSyncCollectionsCreatesAndReconcilesOrderedMembers(t *testing.T) {
 	if !sawRemove || !sawOrder {
 		t.Fatalf("calls=%v", calls)
 	}
+	specs[0].MediaIDs = []string{"b", "c", "d", "e"}
+	changed, complete, err := client.SyncCollectionsBatch(context.Background(), specs, 1)
+	if err != nil || complete || changed != 1 {
+		t.Fatalf("batch changed=%d complete=%v err=%v", changed, complete, err)
+	}
+	_, complete, err = client.SyncCollectionsBatch(context.Background(), specs, 0)
+	if err != nil || !complete || len(members) != 4 || members["e"] != 3 {
+		t.Fatalf("resume complete=%v members=%v err=%v", complete, members, err)
+	}
 }

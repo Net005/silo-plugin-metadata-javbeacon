@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.19] - 2026-09-27
+
+### Fixed
+
+- Sync collections from Silo’s paginated local catalog for a configured library, avoiding the RuntimeHost media-list callback that times out in scheduled tasks. Reconcile up to 40 changes per run and resume on later runs.
+
 ## [0.4.18] - 2026-09-27
 
 ### Fixed
