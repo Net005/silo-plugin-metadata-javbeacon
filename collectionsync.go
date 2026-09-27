@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -40,7 +41,9 @@ type collectionSyncTaskServer struct {
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log hclog.Logger
+	log     hclog.Logger
+	mu      sync.Mutex
+	running map[string]bool
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -60,38 +63,45 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 // as task_key on every Run call. Anything other than "match-unmatched" (an
 // empty key, or the id "collection-sync") falls back to the collection-tag
 // sync this struct originally implemented alone.
-func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
+func (s *collectionSyncTaskServer) Run(_ context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := req.GetTaskKey()
-	log := s.logger()
-	started := time.Now()
-	log.Info("scheduled task run starting", "task_key", taskKey)
-	// Silo's own admin UI only ever shows "Task failed. Inspect
-	// administrator diagnostics for details." on error, with no further
-	// text (confirmed live) - this Info/Error pair around the whole call is
-	// what actually makes that diagnostics text findable, in Silo's own Logs
-	// page, for whatever this plugin's own log() calls below didn't already
-	// narrow down. Recorded even on success so a run's actual duration is
-	// visible without cross-referencing the admin UI's own timer.
-	var summary map[string]any
-	var err error
-	if taskKey == "match-unmatched" {
-		summary, err = s.matchUnmatched(ctx)
-	} else {
-		summary, err = s.sync(ctx)
+	if taskKey != "match-unmatched" {
+		taskKey = "collection-sync"
 	}
-	elapsed := time.Since(started)
-	if err != nil {
-		log.Error("scheduled task run failed", "task_key", taskKey, "elapsed", elapsed, "err", err, "ctx_err", ctx.Err())
-	} else {
-		log.Info("scheduled task run finished", "task_key", taskKey, "elapsed", elapsed, "summary", summary)
+	s.mu.Lock()
+	if s.running == nil {
+		s.running = make(map[string]bool)
 	}
-	output, encodeErr := structpb.NewStruct(summary)
-	if encodeErr != nil {
-		// Encoding our own summary failing is not worth turning a successful
-		// sync into a reported failure - fall back to an empty output struct.
-		output = &structpb.Struct{}
+	if s.running[taskKey] {
+		s.mu.Unlock()
+		output, _ := structpb.NewStruct(map[string]any{"status": "already_running"})
+		return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
 	}
-	return &pluginv1.RunScheduledTaskResponse{Output: output}, err
+	s.running[taskKey] = true
+	s.mu.Unlock()
+	// Silo gives this RPC a short deadline. A library-wide job must outlive it.
+	go func() {
+		defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+		defer cancel()
+		started := time.Now()
+		log := s.logger()
+		log.Info("scheduled task background run starting", "task_key", taskKey)
+		var summary map[string]any
+		var err error
+		if taskKey == "match-unmatched" {
+			summary, err = s.matchUnmatched(ctx)
+		} else {
+			summary, err = s.sync(ctx)
+		}
+		if err != nil {
+			log.Error("scheduled task background run failed", "task_key", taskKey, "elapsed", time.Since(started), "err", err)
+		} else {
+			log.Info("scheduled task background run finished", "task_key", taskKey, "elapsed", time.Since(started), "summary", summary)
+		}
+	}()
+	output, _ := structpb.NewStruct(map[string]any{"status": "started", "task_key": taskKey})
+	return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
 }
 
 func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, error) {
@@ -126,11 +136,8 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	}
 	siloKey := s.runtime.provider.SiloAPIKey()
 	if siloKey == "" {
-		// Not an error: the admin simply hasn't opted into this feature by
-		// setting a Silo API key yet. Still record the revision so a later
-		// key configuration starts fresh rather than immediately firing a
-		// backlog of refreshes for changes that accumulated while it was off.
-		s.runtime.provider.SetLastSyncedRevision(sync.Revision)
+		// Keep the revision pending so configuring a key later still applies
+		// the current collection memberships.
 		return map[string]any{"status": "skipped", "reason": "no Silo API key configured (see this plugin's Collection Tag Sync setting)"}, nil
 	}
 	// GetHostInfo is a RuntimeHost RPC call FROM this plugin BACK INTO the
@@ -169,7 +176,9 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		}
 		refreshed++
 	}
-	s.runtime.provider.SetLastSyncedRevision(sync.Revision)
+	if lastErr == nil {
+		s.runtime.provider.SetLastSyncedRevision(sync.Revision)
+	}
 
 	summary := map[string]any{
 		"status":         "ok",
@@ -180,7 +189,9 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		"tracked_in_any": len(releaseIDs),
 	}
 	if lastErr != nil {
+		summary["status"] = "partial_failure"
 		summary["last_error"] = lastErr.Error()
+		return summary, lastErr
 	}
 	return summary, nil
 }

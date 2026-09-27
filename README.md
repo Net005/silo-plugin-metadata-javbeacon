@@ -62,6 +62,14 @@ Silo's plugin SDK (v0.15.0) actually allows:
   screenshot: this plugin now gets its own dedicated
   `GET .../releases/{id}/stash-cover` fallback image (see "Artwork" below)
   rather than reusing Jellyfin's.
+- **Performer birth dates and homepages** - JAVBeacon includes the StashApp
+  performer's ID and birthdate in the scene metadata it already fetches.
+  After Silo stores a cast member, a bounded background worker finds that
+  exact person in Silo and patches the birth date when StashApp has one, plus
+  a public JAVBeacon redirect URL as the homepage. This uses Silo's admin
+  person API because SDK v0.15.0's `PersonRecord` has no birth-date or
+  homepage fields. It requires the configured Silo API key; failures appear
+  in the plugin log and are retried on a later metadata fetch.
 - **Performer photos** - JAVBeacon never scrapes performer photos itself, so
   `GetMetadata` attaches a `PersonRecord.photo_path` (resolved through the
   same `javbeacon://` scheme as posters/backdrops) for every performer
@@ -131,6 +139,20 @@ Silo's plugin SDK (v0.15.0) actually allows:
   separate, not-yet-started piece of work (it would need its own DOM
   inspection of Silo's web app and a way to authenticate the browser's calls
   back to JAVBeacon).
+
+## Scan performance
+
+JAVBeacon checks the indexed exact release code before its fuzzy search when
+Silo scans a filename that contains a code. The per-release metadata response
+uses the last complete collection index while a rebuild runs in the
+background, so a slow filter-preset calculation no longer stalls every scan
+item. The plugin caches each release response for five minutes and coalesces
+concurrent requests, avoiding duplicate JAVBeacon and StashApp calls when
+Silo asks for metadata and artwork separately.
+
+Scheduled tasks return promptly and continue as bounded background jobs, since
+Silo's task RPC has a short deadline. A second invocation of the same task
+reports `already_running`; completion and failures are logged by the plugin.
 
 ## Requirements
 

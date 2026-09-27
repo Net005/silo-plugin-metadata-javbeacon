@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,9 +42,19 @@ func (e *StatusError) Error() string {
 // JAVBeacon repo) - so this plugin carries its own small, equally bounded
 // client instead.
 type Client struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL       string
+	apiKey        string
+	httpClient    *http.Client
+	cacheMu       sync.Mutex
+	metadataCache map[int64]cachedMetadata
+	inflight      map[int64]chan struct{}
+}
+
+// cachedMetadata prevents Silo's GetMetadata and GetImages calls for the same
+// release from repeating the expensive StashApp enrichment in JAVBeacon.
+type cachedMetadata struct {
+	item    *Metadata
+	expires time.Time
 }
 
 // NewClient builds a client for one JAVBeacon instance. A nil hc gets a
@@ -126,16 +137,61 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]Metadat
 // found is not an error" convention the metadata_provider.v1 contract
 // expects (an empty GetMetadataResponse rather than a fault).
 func (c *Client) GetMetadata(ctx context.Context, releaseID int64) (*Metadata, error) {
-	var out Metadata
-	err := c.getJSON(ctx, fmt.Sprintf("/api/v1/integrations/silo/releases/%d", releaseID), &out)
-	if err != nil {
-		var statusErr *StatusError
-		if isNotFound(err, &statusErr) {
-			return nil, nil
+	for {
+		c.cacheMu.Lock()
+		if entry, ok := c.metadataCache[releaseID]; ok && time.Now().Before(entry.expires) {
+			c.cacheMu.Unlock()
+			return entry.item, nil
 		}
-		return nil, err
+		if done := c.inflight[releaseID]; done != nil {
+			c.cacheMu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		if c.inflight == nil {
+			c.inflight = make(map[int64]chan struct{})
+		}
+		done := make(chan struct{})
+		c.inflight[releaseID] = done
+		c.cacheMu.Unlock()
+
+		var out Metadata
+		err := c.getJSON(ctx, fmt.Sprintf("/api/v1/integrations/silo/releases/%d", releaseID), &out)
+		var item *Metadata
+		if err == nil {
+			item = &out
+		} else {
+			var statusErr *StatusError
+			if isNotFound(err, &statusErr) {
+				err = nil
+			}
+		}
+		c.cacheMu.Lock()
+		if err == nil {
+			if c.metadataCache == nil {
+				c.metadataCache = make(map[int64]cachedMetadata)
+			}
+			if len(c.metadataCache) >= 2048 {
+				c.metadataCache = make(map[int64]cachedMetadata)
+			}
+			c.metadataCache[releaseID] = cachedMetadata{item: item, expires: time.Now().Add(5 * time.Minute)}
+		}
+		delete(c.inflight, releaseID)
+		close(done)
+		c.cacheMu.Unlock()
+		return item, err
 	}
-	return &out, nil
+}
+
+// ClearMetadataCache makes a collection revision refresh fetch fresh genres.
+func (c *Client) ClearMetadataCache() {
+	c.cacheMu.Lock()
+	c.metadataCache = nil
+	c.cacheMu.Unlock()
 }
 
 // ReportPlayback calls POST /api/v1/integrations/silo/playback, forwarding a
@@ -195,6 +251,15 @@ func isNotFound(err error, target **StatusError) bool {
 	}
 	*target = se
 	return se.StatusCode == http.StatusNotFound
+}
+
+// PublicURL resolves a route that needs no JAVBeacon API key, such as the
+// performer-to-Stash redirect used as a Silo person homepage.
+func (c *Client) PublicURL(rawPath string) string {
+	if c == nil || c.baseURL == "" || !strings.HasPrefix(rawPath, "/") {
+		return ""
+	}
+	return c.baseURL + rawPath
 }
 
 // ImageURL resolves a JAVBeacon-relative path (as carried inside a

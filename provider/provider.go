@@ -116,7 +116,11 @@ func (p *Provider) LibrarySync(ctx context.Context) (*LibrarySync, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.LibrarySync(ctx)
+	snapshot, err := c.LibrarySync(ctx)
+	if err == nil {
+		c.ClearMetadataCache()
+	}
+	return snapshot, err
 }
 
 // ReportPlayback proxies to JAVBeacon's /api/v1/integrations/silo/playback.
@@ -147,4 +151,13 @@ func (p *Provider) ImageURL(rawPath string) string {
 		return ""
 	}
 	return c.ImageURL(rawPath)
+}
+
+// PublicURL exposes only JAVBeacon's public routes without an API key.
+func (p *Provider) PublicURL(path string) string {
+	c, err := p.activeClient()
+	if err != nil {
+		return ""
+	}
+	return c.PublicURL(path)
 }

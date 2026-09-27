@@ -104,7 +104,9 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 		"failed":  failed,
 	}
 	if lastErr != nil {
+		summary["status"] = "partial_failure"
 		summary["last_error"] = lastErr.Error()
+		return summary, lastErr
 	}
 	return summary, nil
 }

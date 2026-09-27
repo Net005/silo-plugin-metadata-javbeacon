@@ -56,7 +56,8 @@ type Metadata struct {
 	// Performers) to a JAVBeacon-proxied StashApp portrait URL - see
 	// metadataItemFromResult in main.go, which sets PersonRecord.PhotoPath
 	// from this. Only populated on the single-release fetch (GetMetadata).
-	PerformerImages map[string]string `json:"performer_images,omitempty"`
+	PerformerImages  map[string]string          `json:"performer_images,omitempty"`
+	PerformerDetails map[string]PerformerDetail `json:"performer_details,omitempty"`
 	// Watchlist mirrors JAVBeacon's own Watchlist membership for this
 	// release, unlike CollectionNames/PerformerImages it costs JAVBeacon
 	// nothing extra to populate and is present on every fetch, including
@@ -66,6 +67,12 @@ type Metadata struct {
 	// entry.
 	Watchlist   bool              `json:"watchlist"`
 	ProviderIDs map[string]string `json:"provider_ids"`
+}
+
+// PerformerDetail is StashApp data already included in JAVBeacon's scene query.
+type PerformerDetail struct {
+	StashID   string `json:"stash_id"`
+	Birthdate string `json:"birthdate,omitempty"`
 }
 
 // PlaybackEvent mirrors JAVBeacon's internal/jellyfin.PlaybackEvent JSON shape

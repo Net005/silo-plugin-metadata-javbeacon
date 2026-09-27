@@ -6,9 +6,12 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -17,6 +20,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
+	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtimedefault"
 
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
@@ -77,6 +81,10 @@ func stringValue(raw any) string {
 }
 
 type metadataServer struct {
+	personOnce sync.Once
+	personJobs chan personJob
+	personSeen sync.Map
+	log        hclog.Logger
 	pluginv1.UnimplementedMetadataProviderServer
 	pluginv1.UnimplementedImageResolverServer
 	runtime *runtimeServer
@@ -135,13 +143,88 @@ func (s *metadataServer) GetMetadata(ctx context.Context, req *pluginv1.GetMetad
 	if err != nil || item == nil {
 		return &pluginv1.GetMetadataResponse{}, err
 	}
+	s.queuePeople(item)
 	return &pluginv1.GetMetadataResponse{Item: metadataItemFromResult(item)}, nil
 }
 
-// GetPersonDetail, GetSeasons, and GetEpisodes have nothing to return:
-// JAVBeacon does not track performer biographies/external ids, and releases
-// have no season/episode structure. Returning an empty response (rather than
-// an error) lets the host move on without treating this as a failed call.
+type personJob struct {
+	name   string
+	detail provider.PerformerDetail
+}
+
+func (s *metadataServer) queuePeople(item *provider.Metadata) {
+	if len(item.PerformerDetails) == 0 || s.runtime.provider.SiloAPIKey() == "" {
+		return
+	}
+	s.personOnce.Do(func() {
+		s.personJobs = make(chan personJob, 1024)
+		for range 4 {
+			go s.personWorker()
+		}
+	})
+	for _, name := range item.Performers {
+		detail, ok := item.PerformerDetails[name]
+		if !ok || detail.StashID == "" {
+			continue
+		}
+		next := time.Now().Add(24 * time.Hour)
+		if previous, loaded := s.personSeen.LoadOrStore(detail.StashID, next); loaded {
+			if expiry, ok := previous.(time.Time); ok && time.Now().Before(expiry) {
+				continue
+			}
+			s.personSeen.Store(detail.StashID, next)
+		}
+		select {
+		case s.personJobs <- personJob{name: name, detail: detail}:
+		default:
+			s.personSeen.Delete(detail.StashID)
+		}
+	}
+}
+
+func (s *metadataServer) personWorker() {
+	for job := range s.personJobs {
+		// Silo writes the cast after GetMetadata returns. Retry while that
+		// write is settling, then allow a future fetch to enqueue again.
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		var err error
+		for attempt, delay := range []time.Duration{3 * time.Second, 5 * time.Second, 15 * time.Second} {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				err = ctx.Err()
+				break
+			}
+			host := sdkruntime.Host()
+			if host == nil {
+				err = fmt.Errorf("runtime host is not bound")
+				break
+			}
+			info, hostErr := host.GetHostInfo(ctx)
+			if hostErr != nil {
+				err = hostErr
+				break
+			}
+			homepage := s.runtime.provider.PublicURL("/api/v1/integrations/performers/" + url.PathEscape(job.detail.StashID) + "/stash")
+			err = provider.NewSiloClient(info.InternalBaseURL, s.runtime.provider.SiloAPIKey()).EnrichPerson(ctx, job.name, job.detail.Birthdate, homepage)
+			if err == nil || attempt == 2 {
+				break
+			}
+		}
+		if err != nil {
+			s.personSeen.Delete(job.detail.StashID)
+			if s.log != nil {
+				s.log.Warn("performer enrichment failed", "name", job.name, "err", err)
+			}
+		}
+		cancel()
+	}
+}
+
+// Silo's current PersonRecord cannot carry a Stash performer ID, birthdate,
+// or homepage into GetPersonDetail. The background admin API patch above
+// supplies the requested person fields; there is no stable ID to resolve in
+// this RPC. Releases have no season/episode structure.
 func (s *metadataServer) GetPersonDetail(context.Context, *pluginv1.GetPersonDetailRequest) (*pluginv1.GetPersonDetailResponse, error) {
 	return &pluginv1.GetPersonDetailResponse{}, nil
 }
@@ -378,7 +461,7 @@ func main() {
 	logger := hclog.New(&hclog.LoggerOptions{Name: "javbeacon-metadata", Level: hclog.Info})
 
 	rs := &runtimeServer{manifest: manifest, provider: provider.NewProvider()}
-	ms := &metadataServer{runtime: rs}
+	ms := &metadataServer{runtime: rs, log: logger}
 	ws := &watchSyncServer{runtime: rs}
 	cs := &collectionSyncTaskServer{runtime: rs, log: logger}
 
