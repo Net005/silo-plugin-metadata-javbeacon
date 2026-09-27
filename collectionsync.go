@@ -116,18 +116,10 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		return map[string]any{"status": "unchanged", "revision": sync.Revision}, nil
 	}
 
-	// releaseIDs is every release ID that appears in ANY saved filter set.
-	// Refreshing the union (rather than diffing exactly which presets a
-	// release joined/left since last time) is deliberately coarser but much
-	// simpler and self-correcting - a release that already has its correct
-	// genre tags just gets a harmless no-op "complete" refresh alongside the
-	// ones that actually changed.
-	releaseIDs := map[int64]bool{}
-	for _, preset := range sync.FilterPresets {
-		for _, id := range preset.ReleaseIDs {
-			releaseIDs[id] = true
-		}
-	}
+	// Refresh every release that currently needs a derived genre. Watchlist
+	// membership is independent of saved filter sets, so it must be included
+	// even when no filter sets exist.
+	releaseIDs := collectionReleaseIDs(sync)
 
 	host := sdkruntime.Host()
 	if host == nil {
@@ -226,4 +218,25 @@ func mapReleaseIDsToMediaIDs(ctx context.Context, host *runtimehost.Client, rele
 		pageToken = resp.NextPageToken
 	}
 	return mediaIDs, nil
+}
+
+// collectionReleaseIDs collects both sources of Silo's derived genre tags.
+func collectionReleaseIDs(snapshot *provider.LibrarySync) map[int64]bool {
+	ids := map[int64]bool{}
+	if snapshot == nil {
+		return ids
+	}
+	for _, item := range snapshot.Watchlist {
+		if item.ReleaseID > 0 {
+			ids[item.ReleaseID] = true
+		}
+	}
+	for _, preset := range snapshot.FilterPresets {
+		for _, id := range preset.ReleaseIDs {
+			if id > 0 {
+				ids[id] = true
+			}
+		}
+	}
+	return ids
 }

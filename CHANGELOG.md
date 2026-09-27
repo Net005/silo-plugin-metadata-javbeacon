@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.8] - 2026-09-27
+
+### Fixed
+
+- Refresh Silo metadata for JAVBeacon Watchlist members during collection
+  sync, including when there are no saved filter set memberships. This
+  applies the Watchlist genre tag to already-matched releases.
+
 ## [0.4.7] - 2026-09-27
 
 ### Changed
