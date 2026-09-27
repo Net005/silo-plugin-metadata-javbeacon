@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.15] - 2026-09-27
+
+### Fixed
+
+- Run collection synchronization inside the scheduled-task RPC too, so Silo reports real success or failure instead of treating a detached goroutine as a completed task.
+
 ## [0.4.14] - 2026-09-27
 
 ### Fixed

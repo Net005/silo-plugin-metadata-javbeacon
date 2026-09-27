@@ -48,8 +48,7 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 // ScheduledTask service per plugin process - the manifest declares each
 // scheduled_task.v1 capability as a separate id, and Silo passes that id back
 // as task_key on every Run call. Anything other than "match-unmatched" (an
-// empty key, or the id "collection-sync") falls back to the collection-tag
-// sync this struct originally implemented alone.
+// empty key, or the id "collection-sync") runs collection reconciliation.
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := req.GetTaskKey()
 	if taskKey != "match-unmatched" {
@@ -66,43 +65,24 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 	}
 	s.running[taskKey] = true
 	s.mu.Unlock()
+	defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
+	workCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	var summary map[string]any
+	var err error
 	if taskKey == "match-unmatched" {
-		defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-		workCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		defer cancel()
-		summary, err := s.matchUnmatched(workCtx)
-		if err != nil {
-			s.logger().Error("auto-match task failed", "err", err)
-			return nil, err
-		}
-		output, err := structpb.NewStruct(summary)
-		if err != nil {
-			return nil, err
-		}
-		return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
+		summary, err = s.matchUnmatched(workCtx)
+	} else {
+		summary, err = s.sync(workCtx)
 	}
-	// Silo gives this RPC a short deadline. A library-wide job must outlive it.
-	go func() {
-		defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-		defer cancel()
-		started := time.Now()
-		log := s.logger()
-		log.Info("scheduled task background run starting", "task_key", taskKey)
-		var summary map[string]any
-		var err error
-		if taskKey == "match-unmatched" {
-			summary, err = s.matchUnmatched(ctx)
-		} else {
-			summary, err = s.sync(ctx)
-		}
-		if err != nil {
-			log.Error("scheduled task background run failed", "task_key", taskKey, "elapsed", time.Since(started), "err", err)
-		} else {
-			log.Info("scheduled task background run finished", "task_key", taskKey, "elapsed", time.Since(started), "summary", summary)
-		}
-	}()
-	output, _ := structpb.NewStruct(map[string]any{"status": "started", "task_key": taskKey})
+	if err != nil {
+		s.logger().Error("scheduled task failed", "task_key", taskKey, "err", err)
+		return nil, err
+	}
+	output, err := structpb.NewStruct(summary)
+	if err != nil {
+		return nil, err
+	}
 	return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
 }
 
