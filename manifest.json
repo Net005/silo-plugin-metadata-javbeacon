@@ -1,0 +1,134 @@
+{
+  "plugin_id": "javbeacon.metadata",
+  "version": "0.4.3",
+  "checksum": "__CHECKSUM__",
+  "silo_api_version": "v1",
+  "presentation": {
+    "display_name": "JAVBeacon Metadata",
+    "summary": "Fetch release metadata and cover art from a self-hosted JAVBeacon instance.",
+    "description_markdown": "Provides title, actresses, studio, label, tags, release date, and cover/screenshot artwork for releases tracked by [JAVBeacon](https://github.com/Net005/JAVBeacon), a self-hosted JAV release monitor/downloader. Intended as the metadata provider for a JAV-focused Movies library - each JAVBeacon release is served to Silo as a single movie item, matched by JAVBeacon's own release ID (no search-by-title matching is required once a library item is linked).",
+    "setup_markdown": "1. Install the plugin.\n2. Add a **JAVBeacon Connection** under this plugin's configuration: your JAVBeacon instance's base URL (e.g. `https://jav.example.com`) and an API key from JAVBeacon's Settings page.\n3. Add **JAVBeacon** as a metadata provider for the library you use for your JAV collection.\n\nThis plugin does not resize or transform artwork beyond what JAVBeacon itself already serves: posters use JAVBeacon's `/covers/{id}/silo-primary` endpoint (a portrait-cropped version of the source cover, already normalized because most scraped JAV covers are wide DVD-case scans rather than true portrait posters), and every other requested image size falls back to that same URL - JAVBeacon does not currently generate multiple resolutions to choose from.",
+    "homepage_url": "https://github.com/Net005/JAVBeacon",
+    "source_url": "https://github.com/Net005/silo-plugin-metadata-javbeacon",
+    "support_url": "https://github.com/Net005/silo-plugin-metadata-javbeacon/issues",
+    "changelog_url": "https://github.com/Net005/silo-plugin-metadata-javbeacon/releases",
+    "publisher_name": "Net005",
+    "publisher_url": "https://github.com/Net005",
+    "license_spdx": "NOASSERTION"
+  },
+  "supported_platforms": [
+    {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64"
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64"
+    }
+  ],
+  "capabilities": [
+    {
+      "type": "metadata_provider.v1",
+      "id": "javbeacon",
+      "display_name": "JAVBeacon",
+      "description": "Release metadata from a self-hosted JAVBeacon instance.",
+      "metadata": {
+        "default_priority": {
+          "movie": 1
+        }
+      }
+    },
+    {
+      "type": "image_resolver.v1",
+      "id": "javbeacon",
+      "display_name": "JAVBeacon Images",
+      "description": "Resolves javbeacon:// image paths to a self-hosted JAVBeacon instance.",
+      "metadata": {
+        "schemes": [
+          "javbeacon"
+        ],
+        "priority": 100
+      }
+    },
+    {
+      "type": "watch_sync_provider.v1",
+      "id": "javbeacon",
+      "display_name": "JAVBeacon Playback Sync",
+      "description": "Reports playback progress and completion back to your self-hosted JAVBeacon instance, which forwards it on to StashApp (play count, O count, resume position).",
+      "watch_sync_provider": {
+        "auth_methods": ["WATCH_SYNC_AUTH_METHOD_API_KEY"],
+        "export_watched": true,
+        "import_watched": true,
+        "import_watchlist": true,
+        "scrobble_playback": true,
+        "supported_media_types": ["WATCH_SYNC_MEDIA_TYPE_MOVIE"],
+        "external_id_namespaces": ["javbeacon"],
+        "max_batch_size": 25
+      }
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "collection-sync",
+      "display_name": "Sync JAVBeacon collection tags",
+      "description": "Silo has no plugin API to push updated metadata into an already-matched item, so this task polls JAVBeacon for saved-filter-set membership changes and asks Silo to refresh metadata (Silo's own POST /api/v2/admin/items/{id}/refresh-metadata) for every affected, already-matched item. Run it on a schedule from Silo's Scheduled Tasks page, or trigger it manually after editing a saved filter set."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "match-unmatched",
+      "display_name": "Auto-match unmatched JAVBeacon items",
+      "description": "Silo's own auto-matcher scores search results against the local file's title and year, and JAV releases frequently have no year in their filename - so even an exact release-code title match can score below Silo's auto-accept threshold and sit as unmatched or ambiguous. This task walks Silo's unmatched-items list, re-checks each one against JAVBeacon's own search for an exact release-code hit, and force-applies that match via Silo's admin API (POST /api/v2/admin/items/{id}/match/apply) when the hit is unambiguous - including picking the more fully scraped one automatically when JAVBeacon has two releases sharing that exact code, unless they're equally complete, in which case it still skips the item rather than guess. Requires the Silo API key set below. Run it on a schedule, or trigger it manually after a scan."
+    }
+  ],
+  "global_config_schema": [
+    {
+      "key": "connection",
+      "title": "JAVBeacon Connection",
+      "description": "Where to reach your JAVBeacon instance and how to authenticate to it.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"base_url\":{\"type\":\"string\",\"format\":\"uri\",\"minLength\":1},\"api_key\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"base_url\",\"api_key\"],\"additionalProperties\":false}",
+      "required": true,
+      "admin_form": {
+        "fields": [
+          {
+            "key": "base_url",
+            "label": "JAVBeacon URL",
+            "description": "The base URL of your JAVBeacon instance, e.g. https://jav.example.com",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "https://jav.example.com",
+            "required": true
+          },
+          {
+            "key": "api_key",
+            "label": "API Key",
+            "description": "From JAVBeacon's Settings page.",
+            "control": "ADMIN_FORM_CONTROL_PASSWORD",
+            "required": true,
+            "secret": true
+          }
+        ]
+      }
+    },
+    {
+      "key": "silo_sync",
+      "title": "Collection Tag Sync",
+      "description": "Lets this plugin call Silo's own admin API to refresh metadata on items whose JAVBeacon saved-filter-set (collection tag) membership changed - required only for the \"Sync JAVBeacon collection tags\" scheduled task.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "required": false,
+      "admin_form": {
+        "fields": [
+          {
+            "key": "silo_api_key",
+            "label": "Silo API Key",
+            "description": "An API key for this Silo server itself (Admin → Users → API Keys), used only to call Silo's own refresh-metadata endpoint for items this plugin already matched. Leave blank to disable the scheduled task (it will no-op with a clear log message rather than fail).",
+            "control": "ADMIN_FORM_CONTROL_PASSWORD",
+            "required": false,
+            "secret": true
+          }
+        ]
+      }
+    }
+  ]
+}

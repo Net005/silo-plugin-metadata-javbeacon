@@ -1,0 +1,91 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
+)
+
+func TestSelectExactReleaseIDAcceptsSingleExactCaseInsensitiveHit(t *testing.T) {
+	results := []provider.Metadata{
+		{Code: "ADN-131", ReleaseID: 9001},
+		{Code: "ADN-132", ReleaseID: 9002},
+	}
+	id, ok := selectExactReleaseID(results, "adn-131")
+	if !ok || id != 9001 {
+		t.Fatalf("selectExactReleaseID = (%d, %v), want (9001, true)", id, ok)
+	}
+}
+
+func TestSelectExactReleaseIDRejectsNoMatch(t *testing.T) {
+	results := []provider.Metadata{{Code: "ADN-132", ReleaseID: 9002}}
+	if _, ok := selectExactReleaseID(results, "ADN-131"); ok {
+		t.Fatal("expected no match for a title with no exact code hit")
+	}
+}
+
+func TestSelectExactReleaseIDRejectsAmbiguousMultipleHits(t *testing.T) {
+	// Same code appearing twice with EQUALLY scraped (here: equally empty)
+	// metadata must never be force-applied - there is no signal to tell
+	// which one is correct.
+	results := []provider.Metadata{
+		{Code: "ADN-131", ReleaseID: 9001},
+		{Code: "ADN-131", ReleaseID: 9099},
+	}
+	if _, ok := selectExactReleaseID(results, "ADN-131"); ok {
+		t.Fatal("expected no match when the exact code is ambiguous")
+	}
+}
+
+// TestSelectExactReleaseIDPicksMostCompleteDuplicate guards the real
+// production scenario this fix targets: two releases sharing an exact code
+// (e.g. "THPA-15" from two different site/scraper registrations), one fully
+// scraped and one an essentially empty placeholder. Since one of them
+// strictly has more scraped metadata, this is no longer treated as
+// ambiguous - the fully-scraped one is picked automatically.
+func TestSelectExactReleaseIDPicksMostCompleteDuplicate(t *testing.T) {
+	results := []provider.Metadata{
+		{Code: "THPA-15", ReleaseID: 9001},
+		{
+			Code: "THPA-15", ReleaseID: 9099,
+			PremiereDate: "2026-07-10", Studio: "GIGA", Performers: []string{"Honoka Ashina"},
+			Genres: []string{"Fighters"}, StashSceneID: "stash-1",
+		},
+	}
+	id, ok := selectExactReleaseID(results, "THPA-15")
+	if !ok || id != 9099 {
+		t.Fatalf("selectExactReleaseID = (%d, %v), want (9099, true) - the fully-scraped duplicate", id, ok)
+	}
+}
+
+// TestSelectExactReleaseIDRejectsThreeWayTie guards the tie-break loop
+// itself, not just the two-candidate case: a later candidate matching the
+// current best score must not silently win by virtue of appearing later in
+// the slice.
+func TestSelectExactReleaseIDRejectsThreeWayTie(t *testing.T) {
+	results := []provider.Metadata{
+		{Code: "ADN-131", ReleaseID: 9001, Studio: "A"},
+		{Code: "ADN-131", ReleaseID: 9002, Studio: "B"},
+		{Code: "ADN-131", ReleaseID: 9003, Studio: "C"},
+	}
+	if _, ok := selectExactReleaseID(results, "ADN-131"); ok {
+		t.Fatal("expected no match when all duplicates tie for the best score")
+	}
+}
+
+func TestSelectExactReleaseIDIgnoresPartialOrFuzzyTitles(t *testing.T) {
+	// A fuzzy/substring hit is exactly what Silo's own scorer already tried
+	// and rejected - this helper must never accept one either.
+	results := []provider.Metadata{{Code: "ADN-131", ReleaseID: 9001}}
+	if _, ok := selectExactReleaseID(results, "ADN-131 Some Extra Title Text"); ok {
+		t.Fatal("expected no match for a non-exact title")
+	}
+}
+
+func TestSelectExactReleaseIDTrimsWhitespace(t *testing.T) {
+	results := []provider.Metadata{{Code: " ADN-131 ", ReleaseID: 9001}}
+	id, ok := selectExactReleaseID(results, "ADN-131")
+	if !ok || id != 9001 {
+		t.Fatalf("selectExactReleaseID = (%d, %v), want (9001, true)", id, ok)
+	}
+}
