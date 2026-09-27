@@ -72,7 +72,11 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 	s.running[taskKey] = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-	workCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	budget := 8 * time.Second
+	if taskKey == "collection-sync" {
+		budget = 25 * time.Second
+	}
+	workCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	var summary map[string]any
 	var err error

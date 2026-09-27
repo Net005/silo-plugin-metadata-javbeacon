@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.20] - 2026-09-27
+
+### Fixed
+
+- Give collection sync enough time to read the authoritative StashApp Watchlist snapshot and reconcile a bounded membership batch. Auto-match keeps its shorter work window.
+
 ## [0.4.19] - 2026-09-27
 
 ### Fixed
