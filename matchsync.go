@@ -71,7 +71,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			offset = 0
 		}
 		for i := offset; i < len(items); i++ {
-			if ctx.Err() != nil || shortDeadline(ctx) || matched >= 40 {
+			if ctx.Err() != nil || shortDeadline(ctx) || matched >= 100 {
 				return s.matchPartial(cursor, i, matched, skipped, failed, pages, "batch_limit")
 			}
 			item := items[i]

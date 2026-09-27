@@ -72,7 +72,7 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 	s.running[taskKey] = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-	budget := 8 * time.Second
+	budget := 20 * time.Second
 	if taskKey == "collection-sync" {
 		budget = 25 * time.Second
 	}
@@ -161,7 +161,7 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		}
 		specs = collectionSpecs(snapshot, media)
 	}
-	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 40)
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 120)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
 			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed}, nil

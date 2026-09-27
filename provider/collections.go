@@ -25,10 +25,12 @@ type CollectionSpec struct {
 const collectionOwner = "Managed by JAVBeacon metadata plugin."
 
 type siloCollection struct {
-	ID          string `json:"id"`
-	LibraryID   string `json:"library_id"`
-	Slug        string `json:"slug"`
-	Description string `json:"description"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	GroupID     *string `json:"group_id"`
+	LibraryID   string  `json:"library_id"`
+	Slug        string  `json:"slug"`
+	Description string  `json:"description"`
 }
 
 func collectionSlug(spec CollectionSpec) string {
@@ -162,12 +164,25 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			}
 		}
 	}
+	// Silo displays ungrouped collections in manual order. Keep our own
+	// collection slots alphabetized while preserving every other collection's
+	// relative position and group membership.
+	orderChanges, err := c.sortManagedCollections(ctx, existing)
+	if err != nil {
+		return 0, false, err
+	}
+	changed := orderChanges
+	if orderChanges > 0 {
+		if maxChanges > 0 && changed >= maxChanges {
+			return changed, false, nil
+		}
+	}
 	slugs := make([]string, 0, len(desired))
 	for slug := range desired {
 		slugs = append(slugs, slug)
 	}
 	sort.Strings(slugs)
-	changed := 0
+	createdAny := false
 	for _, slug := range slugs {
 		spec := desired[slug]
 		collection, exists := bySlug[slug]
@@ -183,6 +198,7 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 				return changed, false, err
 			}
 			changed++
+			createdAny = true
 			if maxChanges > 0 && changed >= maxChanges {
 				return changed, false, nil
 			}
@@ -251,5 +267,86 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 		}
 
 	}
+	if createdAny {
+		updated, err := c.collections(ctx)
+		if err != nil {
+			return changed, false, err
+		}
+		orderChanges, err := c.sortManagedCollections(ctx, updated)
+		changed += orderChanges
+		if err != nil {
+			return changed, false, err
+		}
+	}
 	return changed, true, nil
+}
+
+// alphabetizeManagedSlots sorts only plugin-owned collections into their
+// existing slots. Other collections keep their positions in Silo's list.
+func alphabetizeManagedSlots(ids []string, byID map[string]siloCollection) ([]string, bool) {
+	ordered := append([]string(nil), ids...)
+	slots := []int{}
+	managed := []string{}
+	for index, id := range ids {
+		item, ok := byID[id]
+		if ok && item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
+			slots = append(slots, index)
+			managed = append(managed, id)
+		}
+	}
+	sort.SliceStable(managed, func(i, j int) bool {
+		a := strings.ToLower(byID[managed[i]].Title)
+		b := strings.ToLower(byID[managed[j]].Title)
+		if a == b {
+			return managed[i] < managed[j]
+		}
+		return a < b
+	})
+	changed := false
+	for i, slot := range slots {
+		if ordered[slot] != managed[i] {
+			changed = true
+		}
+		ordered[slot] = managed[i]
+	}
+	return ordered, changed
+}
+
+func (c *SiloClient) sortManagedCollections(ctx context.Context, existing []siloCollection) (int, error) {
+	byID := make(map[string]siloCollection, len(existing))
+	libraries := map[string]bool{}
+	for _, item := range existing {
+		byID[item.ID] = item
+		if item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
+			libraries[item.LibraryID] = true
+		}
+	}
+	libraryIDs := make([]string, 0, len(libraries))
+	for libraryID := range libraries {
+		libraryIDs = append(libraryIDs, libraryID)
+	}
+	sort.Strings(libraryIDs)
+	changes := 0
+	for _, libraryID := range libraryIDs {
+		path := "/api/v2/admin/collections/order?library_id=" + url.QueryEscape(libraryID)
+		var current struct {
+			OrderedIDs []string `json:"ordered_ids"`
+		}
+		etag, err := c.collectionRequestETag(ctx, http.MethodGet, path, nil, &current, "")
+		if err != nil {
+			return changes, err
+		}
+		ordered, changed := alphabetizeManagedSlots(current.OrderedIDs, byID)
+		if !changed {
+			continue
+		}
+		if etag == "" {
+			return changes, fmt.Errorf("silo: collection list order ETag is missing")
+		}
+		if _, err := c.collectionRequestETag(ctx, http.MethodPut, "/api/v2/admin/collections/order", map[string]any{"library_id": libraryID, "ordered_ids": ordered}, nil, etag); err != nil {
+			return changes, err
+		}
+		changes++
+	}
+	return changes, nil
 }

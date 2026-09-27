@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.21] - 2026-09-27
+
+### Changed
+
+- Keep JAVBeacon-managed Silo collections alphabetized in the library collection list while preserving other collections' positions.
+- Raise collection reconciliation to 120 changes and auto-match to 100 matches per run. Give auto-match up to 20 seconds, while still yielding on Silo rate limits or a nearing task deadline.
+
 ## [0.4.20] - 2026-09-27
 
 ### Fixed

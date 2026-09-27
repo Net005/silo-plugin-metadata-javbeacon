@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -26,6 +27,13 @@ func TestSyncCollectionsCreatesAndReconcilesOrderedMembers(t *testing.T) {
 				items = append(items, collection)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "page": map[string]any{"has_more": false}})
+		case r.URL.Path == "/api/v2/admin/collections/order" && r.Method == http.MethodGet:
+			w.Header().Set("ETag", `"collection-order-v1"`)
+			ids := []string{}
+			if collection.ID != "" {
+				ids = append(ids, collection.ID)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ordered_ids": ids})
 		case r.URL.Path == "/api/v2/admin/collections" && r.Method == http.MethodPost:
 			var data struct {
 				Title       string `json:"title"`
@@ -115,5 +123,26 @@ func TestSyncCollectionsCreatesAndReconcilesOrderedMembers(t *testing.T) {
 	_, complete, err = client.SyncCollectionsBatch(context.Background(), specs, 0)
 	if err != nil || !complete || len(members) != 4 || members["e"] != 3 {
 		t.Fatalf("resume complete=%v members=%v err=%v", complete, members, err)
+	}
+}
+
+func TestAlphabetizeManagedSlotsPreservesOtherCollections(t *testing.T) {
+	owned := func(id, title string) siloCollection {
+		return siloCollection{ID: id, Title: title, Slug: "javbeacon-preset-" + id, Description: collectionOwner, LibraryID: "lib"}
+	}
+	byID := map[string]siloCollection{
+		"prison":    owned("prison", "Prison"),
+		"debt":      owned("debt", "Debt"),
+		"watchlist": owned("watchlist", "Watchlist"),
+		"user":      {ID: "user", Title: "Mine", LibraryID: "lib"},
+	}
+	got, changed := alphabetizeManagedSlots([]string{"prison", "user", "watchlist", "debt"}, byID)
+	want := []string{"debt", "user", "prison", "watchlist"}
+	if !changed || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, changed %v; want %v", got, changed, want)
+	}
+	got, changed = alphabetizeManagedSlots(got, byID)
+	if changed || !reflect.DeepEqual(got, want) {
+		t.Fatalf("already sorted: got %v, changed %v", got, changed)
 	}
 }
