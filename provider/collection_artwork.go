@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const artworkRotation = 72 * time.Hour
+const artworkRotation = 6 * time.Hour
 
 type artworkMarker struct {
 	Bucket     int64  `json:"bucket"`
@@ -25,7 +25,7 @@ type artworkMarker struct {
 }
 
 // artworkChoice selects only images belonging to this collection's current
-// local members. The choice remains stable for three days so routine polls
+// local members. The choice remains stable for six hours so routine polls
 // do not churn Silo artwork or its image cache.
 func artworkChoice(spec CollectionSpec, now time.Time) (CollectionArtwork, CollectionArtwork) {
 	members := make(map[string]bool, len(spec.MediaIDs))

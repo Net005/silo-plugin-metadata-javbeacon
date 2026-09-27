@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.23] - 2026-09-27
+
+### Changed
+
+- Rotate Silo collection artwork every six hours instead of every three days.
+
 ## [0.4.22] - 2026-09-27
 
 ### Added
