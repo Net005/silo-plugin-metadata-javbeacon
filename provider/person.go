@@ -42,18 +42,35 @@ func (c *SiloClient) EnrichPerson(ctx context.Context, name, birthdate, homepage
 	}
 	var people struct {
 		Items []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			PhotoURL string `json:"photo_url"`
 		} `json:"items"`
 	}
-	path := "/api/v2/catalog/people?q=" + url.QueryEscape(name) + "&limit=100"
-	if err := c.personRequest(ctx, http.MethodGet, path, profileID, nil, &people); err != nil {
-		return err
+	stashID := ""
+	if parts := strings.Split(strings.Trim(homepage, "/"), "/"); len(parts) >= 2 && parts[len(parts)-1] == "stash" {
+		stashID = parts[len(parts)-2]
+	}
+	queries := []string{name}
+	words := strings.Fields(name)
+	if len(words) == 2 {
+		queries = append(queries, words[1]+" "+words[0])
 	}
 	id := ""
-	for _, person := range people.Items {
-		if strings.EqualFold(strings.TrimSpace(person.Name), strings.TrimSpace(name)) {
-			if id != "" {
+	for _, query := range queries {
+		people.Items = nil
+		path := "/api/v2/catalog/people?q=" + url.QueryEscape(query) + "&limit=100"
+		if err := c.personRequest(ctx, http.MethodGet, path, profileID, nil, &people); err != nil {
+			return err
+		}
+		for _, person := range people.Items {
+			if !strings.EqualFold(strings.TrimSpace(person.Name), query) {
+				continue
+			}
+			if stashID != "" && !strings.Contains(person.PhotoURL, "/performers/"+url.PathEscape(stashID)+"/image") {
+				continue
+			}
+			if id != "" && id != person.ID {
 				return fmt.Errorf("silo: ambiguous person name %q", name)
 			}
 			id = person.ID

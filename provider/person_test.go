@@ -43,3 +43,28 @@ func TestEnrichPersonOnlySetsKnownBirthdate(t *testing.T) {
 		t.Fatalf("birth date = %q", patch["birth_date"])
 	}
 }
+
+func TestEnrichPersonReversedNameUsesStashPortrait(t *testing.T) {
+	var patched string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v2/profiles", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"items":[{"id":"primary","is_primary":true}]}`))
+	})
+	mux.HandleFunc("GET /api/v2/catalog/people", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("q") == "Takeuchi Yuuki" {
+			w.Write([]byte(`{"items":[{"id":"right","name":"Takeuchi Yuuki","photo_url":"https://jav.example/api/v1/integrations/performers/4731/image"}]}`))
+		} else {
+			w.Write([]byte(`{"items":[]}`))
+		}
+	})
+	mux.HandleFunc("PATCH /api/v2/admin/people/right", func(w http.ResponseWriter, r *http.Request) { patched = r.URL.Path; w.WriteHeader(http.StatusOK) })
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := NewSiloClient(server.URL, "test-key")
+	if err := client.EnrichPerson(context.Background(), "Yuuki Takeuchi", "1995-02-12", "https://jav.example/api/v1/integrations/performers/4731/stash"); err != nil {
+		t.Fatal(err)
+	}
+	if patched != "/api/v2/admin/people/right" {
+		t.Fatalf("patched %q", patched)
+	}
+}

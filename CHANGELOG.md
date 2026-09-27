@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.29] - 2026-09-27
+
+### Fixed
+
+- Match Stash performers to Silo people when first and last names are reversed, verifying the Stash ID against the portrait URL before updating birth date and homepage.
+
 ## [0.4.28] - 2026-09-27
 
 ### Fixed
