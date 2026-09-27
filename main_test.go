@@ -196,12 +196,26 @@ func TestMetadataItemFromResultAddsCollectionAndWatchlistGenres(t *testing.T) {
 }
 
 func TestMetadataItemFromResultOmitsWatchlistGenreWhenNotWatchlisted(t *testing.T) {
-	item := &provider.Metadata{ReleaseID: 1, Code: "X", Watchlist: false}
+	item := &provider.Metadata{ReleaseID: 1, Code: "X", Genres: []string{"Watchlist", "Drama"}, Watchlist: false}
 	out := metadataItemFromResult(item)
 	for _, g := range out.Genres {
 		if g == "Watchlist" {
 			t.Fatalf("Genres = %v, must not contain Watchlist when item.Watchlist is false", out.Genres)
 		}
+	}
+}
+
+func TestMetadataItemFromResultDoesNotDuplicateStashWatchlistGenre(t *testing.T) {
+	item := &provider.Metadata{Code: "X", Genres: []string{"Drama", "Watchlist"}, Watchlist: true}
+	out := metadataItemFromResult(item)
+	count := 0
+	for _, genre := range out.Genres {
+		if genre == "Watchlist" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("Watchlist genre count=%d in %v", count, out.Genres)
 	}
 }
 

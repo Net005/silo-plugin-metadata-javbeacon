@@ -138,3 +138,33 @@ func TestListRemoteStateRequiresConfiguredConnection(t *testing.T) {
 		t.Fatalf("fault = %+v, want INVALID_CREDENTIAL", resp.GetFault())
 	}
 }
+
+func TestListRemoteStateKeepsStashWatchlistOrderAndDistinctScenes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"revision": "stash-rev",
+			"watchlist": []map[string]any{
+				{"release_id": 0, "stash_scene_id": "new-scene", "watchlisted_at": "2026-09-27T10:00:00Z"},
+				{"release_id": 9, "stash_scene_id": "linked-scene", "watchlisted_at": "2026-09-26T10:00:00Z"},
+				{"release_id": 0, "stash_scene_id": "old-scene", "watchlisted_at": "2026-09-25T10:00:00Z"},
+			},
+			"watched": []map[string]any{{"release_id": 9, "stash_scene_id": "linked-scene"}},
+		})
+	}))
+	defer server.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: server.URL, APIKey: "test-key"})
+	ws := &watchSyncServer{runtime: &runtimeServer{provider: p}}
+	resp, err := ws.ListRemoteState(t.Context(), &pluginv1.WatchSyncListRemoteStateRequest{})
+	if err != nil || len(resp.GetItems()) != 3 {
+		t.Fatalf("items=%+v err=%v", resp.GetItems(), err)
+	}
+	for i, want := range []string{"stash:new-scene", "9", "stash:old-scene"} {
+		if got := resp.GetItems()[i].GetProviderItemKey(); got != want {
+			t.Fatalf("item %d key=%q, want %q", i, got, want)
+		}
+	}
+	if _, ok := resp.GetItems()[0].GetMedia().GetExternalIds()[capabilityID]; ok {
+		t.Fatal("Stash-only scene must not have a fabricated JAVBeacon release ID")
+	}
+}

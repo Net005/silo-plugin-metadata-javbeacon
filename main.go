@@ -381,6 +381,16 @@ func metadataItemFromResult(item *provider.Metadata) *pluginv1.MetadataItem {
 	// a saved filter set: Silo has no favorites/watchlist marker of its own
 	// for this plugin to set, so Watchlist membership rides along as a plain
 	// genre entry too, filterable/browsable the same way.
+	// The Stash scene's own tags may already include the Watchlist label.
+	// Keep one copy when present and remove a stale genre after Stash removes
+	// its authoritative tag.
+	filtered := genres[:0]
+	for _, genre := range genres {
+		if !strings.EqualFold(strings.TrimSpace(genre), "Watchlist") {
+			filtered = append(filtered, genre)
+		}
+	}
+	genres = filtered
 	if item.Watchlist {
 		genres = append(genres, "Watchlist")
 	}

@@ -25,11 +25,11 @@ Silo's plugin SDK (v0.15.0) actually allows:
   `migrateJellyfinPlaybackReleaseNullable` in the JAVBeacon repo. In practice
   this only fires once something upstream of this plugin (Silo's own
   matching, or a future scan-source capability) attaches a `stash` external
-  id to a library item that has no `javbeacon` one; today every item this
-  plugin serves already has a JAVBeacon release ID.
-- **Watched/watchlist import** - `ListRemoteState` reports JAVBeacon's
-  existing watched (StashApp play_count > 0) and watchlist state back to
-  Silo, so a freshly matched Silo library item inherits history that already
+  id to a library item that has no `javbeacon` one. Stash-only scene matches
+  use this path when no local JAVBeacon release exists.
+- **Watched/watchlist import** - `ListRemoteState` reports existing
+  watched state (StashApp play_count > 0) and StashApp's configured Watchlist
+  scene tag back to Silo, newest scene update first, so a freshly matched Silo library item inherits history that already
   exists in JAVBeacon instead of starting from zero. This is the opposite
   direction from playback reporting above (JAVBeacon -> Silo, not Silo ->
   JAVBeacon) and always returns a full, authoritative snapshot in one page
@@ -45,7 +45,8 @@ Silo's plugin SDK (v0.15.0) actually allows:
   collection from a plugin. As the closest available substitute,
   `GetMetadata` appends one `"Collection: <name>"` genre entry per saved
   filter set the release currently belongs to, plus a plain `"Watchlist"`
-  genre entry when the release is on JAVBeacon's Watchlist (Silo has no
+  genre entry when its StashApp scene has the configured Watchlist tag
+  (falling back to JAVBeacon's mirror if StashApp is unavailable; Silo has no
   favorites/watchlist marker of its own for this plugin to set instead) -
   both filterable in Silo like any other genre. A saved filter set's name is
   sanitized before becoming a genre value (whitespace/control characters

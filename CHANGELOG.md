@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.9] - 2026-09-27
+
+### Changed
+
+- Preserve StashApp's newest-first Watchlist order and update timestamps
+  during Silo watch sync, including distinct Stash-only scenes.
+- Refresh Stash-only media and prior Watchlist members when their Stash tag
+  changes, and avoid duplicate or stale Watchlist genre labels.
+
 ## [0.4.8] - 2026-09-27
 
 ### Fixed

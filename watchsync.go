@@ -181,32 +181,28 @@ func (s *watchSyncServer) ListRemoteState(ctx context.Context, req *pluginv1.Wat
 	}
 
 	kinds := watchSyncStateKindSet(req.GetStateKinds())
-	byRelease := map[int64]*pluginv1.WatchSyncRemoteState{}
-	var order []int64
+	byItem := map[string]*pluginv1.WatchSyncRemoteState{}
+	var order []string
 	stateFor := func(releaseID int64, stashSceneID string) *pluginv1.WatchSyncRemoteState {
-		if existing, ok := byRelease[releaseID]; ok {
+		key := strconv.FormatInt(releaseID, 10)
+		if releaseID == 0 {
+			key = "stash:" + stashSceneID
+		}
+		if existing, ok := byItem[key]; ok {
 			return existing
 		}
 		state := &pluginv1.WatchSyncRemoteState{
-			ProviderItemKey: strconv.FormatInt(releaseID, 10),
+			ProviderItemKey: key,
 			Media:           remoteStateMedia(releaseID, stashSceneID),
 		}
-		byRelease[releaseID] = state
-		order = append(order, releaseID)
+		byItem[key] = state
+		order = append(order, key)
 		return state
 	}
 
 	if snapshot != nil {
-		if kinds[pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHED] {
-			for _, item := range snapshot.Watched {
-				state := stateFor(item.ReleaseID, item.StashSceneID)
-				watched := &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}
-				if !item.WatchedAt.IsZero() {
-					watched.LastWatchedAt = timestamppb.New(item.WatchedAt)
-				}
-				state.Watched = watched
-			}
-		}
+		// JAVBeacon returns the Stash Watchlist newest first. Preserve its
+		// ordering before adding watched-only rows to the complete snapshot.
 		if kinds[pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHLIST] {
 			for _, item := range snapshot.Watchlist {
 				state := stateFor(item.ReleaseID, item.StashSceneID)
@@ -217,11 +213,21 @@ func (s *watchSyncServer) ListRemoteState(ctx context.Context, req *pluginv1.Wat
 				state.Watchlist = watchlist
 			}
 		}
+		if kinds[pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHED] {
+			for _, item := range snapshot.Watched {
+				state := stateFor(item.ReleaseID, item.StashSceneID)
+				watched := &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}
+				if !item.WatchedAt.IsZero() {
+					watched.LastWatchedAt = timestamppb.New(item.WatchedAt)
+				}
+				state.Watched = watched
+			}
+		}
 	}
 
 	items := make([]*pluginv1.WatchSyncRemoteState, 0, len(order))
-	for _, releaseID := range order {
-		items = append(items, byRelease[releaseID])
+	for _, key := range order {
+		items = append(items, byItem[key])
 	}
 	return &pluginv1.WatchSyncListRemoteStateResponse{Items: items, CompleteSnapshot: true}, nil
 }
@@ -247,7 +253,10 @@ func watchSyncStateKindSet(requested []pluginv1.WatchSyncRemoteStateKind) map[pl
 // state row back to a library item, using the same "javbeacon"/"stash"
 // external id keys ApplyEvents and the metadata provider already round-trip.
 func remoteStateMedia(releaseID int64, stashSceneID string) *pluginv1.WatchSyncMedia {
-	ids := map[string]string{capabilityID: strconv.FormatInt(releaseID, 10)}
+	ids := map[string]string{}
+	if releaseID > 0 {
+		ids[capabilityID] = strconv.FormatInt(releaseID, 10)
+	}
 	if stashSceneID != "" {
 		ids[stashSceneIDProviderKeyLower] = stashSceneID
 	}

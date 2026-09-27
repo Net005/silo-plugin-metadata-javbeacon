@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,9 +42,11 @@ type collectionSyncTaskServer struct {
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log     hclog.Logger
-	mu      sync.Mutex
-	running map[string]bool
+	log                       hclog.Logger
+	mu                        sync.Mutex
+	running                   map[string]bool
+	previousWatchlist         map[string]bool
+	previousWatchlistReleases map[int64]bool
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -120,6 +123,26 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	// membership is independent of saved filter sets, so it must be included
 	// even when no filter sets exist.
 	releaseIDs := collectionReleaseIDs(sync)
+	stashSceneIDs := map[string]bool{}
+	currentWatchlist := map[string]bool{}
+	currentWatchlistReleases := map[int64]bool{}
+	for _, item := range sync.Watchlist {
+		if item.ReleaseID > 0 {
+			currentWatchlistReleases[item.ReleaseID] = true
+		}
+		if item.StashSceneID != "" {
+			stashSceneIDs[item.StashSceneID] = true
+			currentWatchlist[item.StashSceneID] = true
+		}
+	}
+	s.mu.Lock()
+	for sceneID := range s.previousWatchlist {
+		stashSceneIDs[sceneID] = true // Refresh removals too.
+	}
+	for releaseID := range s.previousWatchlistReleases {
+		releaseIDs[releaseID] = true
+	}
+	s.mu.Unlock()
 
 	host := sdkruntime.Host()
 	if host == nil {
@@ -150,7 +173,7 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	siloClient := provider.NewSiloClient(hostInfo.InternalBaseURL, siloKey)
 
 	listMediaStart := time.Now()
-	mediaIDs, err := mapReleaseIDsToMediaIDs(ctx, host, releaseIDs)
+	mediaIDs, err := mapReleaseIDsToMediaIDs(ctx, host, releaseIDs, stashSceneIDs)
 	log.Info("collection-sync: RuntimeHost.ListLibraryMedia paging finished", "elapsed", time.Since(listMediaStart), "matched_items", len(mediaIDs), "err", err)
 	if err != nil {
 		return map[string]any{"status": "error", "error": err.Error()}, err
@@ -170,6 +193,10 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	}
 	if lastErr == nil {
 		s.runtime.provider.SetLastSyncedRevision(sync.Revision)
+		s.mu.Lock()
+		s.previousWatchlist = currentWatchlist
+		s.previousWatchlistReleases = currentWatchlistReleases
+		s.mu.Unlock()
 	}
 
 	summary := map[string]any{
@@ -194,7 +221,7 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 // Silo hasn't matched to a JAVBeacon release at all are naturally absent from
 // both the input set's hits and the output - there is nothing to refresh for
 // them.
-func mapReleaseIDsToMediaIDs(ctx context.Context, host *runtimehost.Client, releaseIDs map[int64]bool) ([]string, error) {
+func mapReleaseIDsToMediaIDs(ctx context.Context, host *runtimehost.Client, releaseIDs map[int64]bool, stashSceneIDs map[string]bool) ([]string, error) {
 	var mediaIDs []string
 	pageToken := ""
 	for {
@@ -207,10 +234,13 @@ func mapReleaseIDsToMediaIDs(ctx context.Context, host *runtimehost.Client, rele
 				continue
 			}
 			id, err := strconv.ParseInt(item.ExternalID, 10, 64)
-			if err != nil || !releaseIDs[id] {
+			if err == nil && releaseIDs[id] {
+				mediaIDs = append(mediaIDs, item.MediaID)
 				continue
 			}
-			mediaIDs = append(mediaIDs, item.MediaID)
+			if strings.HasPrefix(item.ExternalID, "stash:") && stashSceneIDs[strings.TrimPrefix(item.ExternalID, "stash:")] {
+				mediaIDs = append(mediaIDs, item.MediaID)
+			}
 		}
 		if resp.NextPageToken == "" {
 			break
