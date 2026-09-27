@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.7] - 2026-09-27
+
+### Changed
+
+- In auto-match, read every Silo media file path and search by each actual
+  filename before falling back to a parsed title when no file is available.
+  Leave items unmatched if their files resolve to different provider IDs.
+
 ## [0.4.6] - 2026-09-27
 
 ### Added

@@ -192,3 +192,61 @@ func (c *SiloClient) ApplyMatch(ctx context.Context, contentID, libraryID, relea
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return fmt.Errorf("silo: HTTP %d applying match for item %s: %s", resp.StatusCode, contentID, strings.TrimSpace(string(raw)))
 }
+
+// ItemFilePaths returns every media path Silo associates with an unmatched
+// item. The auto-match task uses actual filename stems, not parsed titles.
+func (c *SiloClient) ItemFilePaths(ctx context.Context, contentID string) ([]string, error) {
+	if !c.Configured() {
+		return nil, fmt.Errorf("silo: api key is not configured")
+	}
+	paths := []string{}
+	cursor := ""
+	for pageNumber := 0; pageNumber < 100; pageNumber++ {
+		path := "/api/v2/admin/items/" + url.PathEscape(contentID) + "/files?limit=200"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			return nil, fmt.Errorf("silo: HTTP %d listing item files: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		var result struct {
+			Items []struct {
+				FilePath string `json:"file_path"`
+			} `json:"items"`
+			Page struct {
+				HasMore    bool   `json:"has_more"`
+				NextCursor string `json:"next_cursor"`
+			} `json:"page"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range result.Items {
+			if item.FilePath != "" {
+				paths = append(paths, item.FilePath)
+			}
+		}
+		if !result.Page.HasMore {
+			return paths, nil
+		}
+		if result.Page.NextCursor == "" || result.Page.NextCursor == cursor {
+			return nil, fmt.Errorf("silo: item file pagination did not advance")
+		}
+		cursor = result.Page.NextCursor
+	}
+	return nil, fmt.Errorf("silo: item has too many file pages")
+}

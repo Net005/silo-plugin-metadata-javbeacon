@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -72,9 +73,9 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			if item.ContentType != "" && item.ContentType != "movie" {
 				continue
 			}
-			releaseID, ok, err := s.exactReleaseIDForTitle(ctx, item.Title)
+			releaseID, ok, err := s.exactProviderIDForItem(ctx, siloClient, item)
 			if err != nil {
-				log.Warn("match-unmatched: exactReleaseIDForTitle failed", "content_id", item.ContentID, "title", item.Title, "err", err)
+				log.Warn("match-unmatched: filename lookup failed", "content_id", item.ContentID, "title", item.Title, "err", err)
 				failed++
 				lastErr = err
 				continue
@@ -109,6 +110,45 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 		return summary, lastErr
 	}
 	return summary, nil
+}
+
+// exactProviderIDForItem checks every media filename before the parsed title.
+// Distinct matches across multiple files are ambiguous and never forced.
+func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, client *provider.SiloClient, item provider.UnmatchedItem) (string, bool, error) {
+	paths, err := client.ItemFilePaths(ctx, item.ContentID)
+	if err != nil {
+		return "", false, err
+	}
+	seen := map[string]bool{}
+	found := ""
+	for _, path := range paths {
+		base := filepath.Base(path)
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		stem = strings.TrimSpace(stem)
+		if stem == "" || seen[strings.ToLower(stem)] {
+			continue
+		}
+		seen[strings.ToLower(stem)] = true
+		id, ok, err := s.exactReleaseIDForTitle(ctx, stem)
+		if err != nil {
+			return "", false, err
+		}
+		if !ok {
+			continue
+		}
+		if found != "" && found != id {
+			return "", false, nil
+		}
+		found = id
+	}
+	if found != "" {
+		return found, true, nil
+	}
+	// Older Silo versions may not report media files for an unmatched item.
+	if len(paths) == 0 {
+		return s.exactReleaseIDForTitle(ctx, item.Title)
+	}
+	return "", false, nil
 }
 
 // exactReleaseIDForTitle asks JAVBeacon's own search for title and accepts a

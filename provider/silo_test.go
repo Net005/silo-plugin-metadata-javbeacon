@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -124,5 +125,26 @@ func TestApplyMatchReturnsErrorOnNon2xx(t *testing.T) {
 	err := client.ApplyMatch(t.Context(), "movie:missing", "1", "9001")
 	if err == nil {
 		t.Fatal("expected an error for a 404 response")
+	}
+}
+
+func TestItemFilePathsPagesAllFilenames(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Error("missing Silo API key")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_, _ = w.Write([]byte(`{"items":[{"file_path":"/collections/jav/AD-359.avi"}],"page":{"has_more":true,"next_cursor":"next"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"file_path":"/collections/jav/AD-359-part2.avi"}],"page":{"has_more":false}}`))
+	}))
+	defer server.Close()
+	paths, err := NewSiloClient(server.URL, "secret").ItemFilePaths(context.Background(), "local-1")
+	if err != nil || calls != 2 || len(paths) != 2 {
+		t.Fatalf("paths=%v calls=%d err=%v", paths, calls, err)
 	}
 }
