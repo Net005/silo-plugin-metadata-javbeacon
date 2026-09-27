@@ -125,6 +125,7 @@ type LibrarySync struct {
 	Watchlist     []LibrarySyncItem        `json:"watchlist"`
 	Watched       []LibrarySyncItem        `json:"watched"`
 	FilterPresets []FilterPresetCollection `json:"filter_presets"`
+	ReleaseCodes  map[int64]string         `json:"release_codes,omitempty"`
 }
 
 // LibrarySyncItem mirrors JAVBeacon's internal/jellyfin.LibrarySyncItem JSON

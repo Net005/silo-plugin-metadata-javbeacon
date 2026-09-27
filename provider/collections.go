@@ -198,6 +198,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 	sort.Strings(slugs)
 	createdAny := false
 	for _, slug := range slugs {
+		if collectionDeadlineNear(ctx) {
+			return changed, false, nil
+		}
 		spec := desired[slug]
 		collection, exists := bySlug[slug]
 		if exists && (!strings.HasPrefix(collection.Description, collectionOwner) || collection.LibraryID != spec.LibraryID) {
@@ -230,6 +233,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			}
 		}
 		for position, mediaID := range ordered {
+			if collectionDeadlineNear(ctx) {
+				return changed, false, nil
+			}
 			if _, exists := members[mediaID]; exists {
 				continue
 			}
@@ -243,6 +249,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			}
 		}
 		for mediaID := range members {
+			if collectionDeadlineNear(ctx) {
+				return changed, false, nil
+			}
 			if want[mediaID] {
 				continue
 			}
@@ -266,6 +275,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			}
 		}
 		if needsOrder {
+			if collectionDeadlineNear(ctx) {
+				return changed, false, nil
+			}
 			path := "/api/v2/admin/collections/" + url.PathEscape(collection.ID) + "/items/order"
 			var current json.RawMessage
 			etag, err := c.collectionRequestETag(ctx, http.MethodGet, path, nil, &current, "")
@@ -278,6 +290,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			if _, err := c.collectionRequestETag(ctx, http.MethodPut, path, map[string]any{"ordered_ids": ordered}, nil, etag); err != nil {
 				return changed, false, err
 			}
+		}
+		if collectionDeadlineNear(ctx) {
+			return changed, false, nil
 		}
 		artChanged, err := c.syncCollectionArtwork(ctx, collection, spec, time.Now())
 		if err != nil {
@@ -372,4 +387,10 @@ func (c *SiloClient) sortManagedCollections(ctx context.Context, existing []silo
 		changes++
 	}
 	return changes, nil
+}
+
+// Keep enough time to return partial progress before Silo's task RPC deadline.
+func collectionDeadlineNear(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && time.Until(deadline) < 1500*time.Millisecond
 }

@@ -146,10 +146,14 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		if err != nil {
 			return nil, err
 		}
-		specs, err = collectionSpecsFromCatalog(ctx, snapshot, catalog, s.runtime.provider, libraryID)
-		if err != nil {
-			return nil, err
+		codes := snapshot.ReleaseCodes
+		if codes == nil {
+			codes, err = s.runtime.provider.LocalReleaseCodes(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
+		specs = collectionSpecsFromCatalog(snapshot, catalog, codes, libraryID)
 	} else {
 		host := sdkruntime.Host()
 		if host == nil {
@@ -267,7 +271,7 @@ func normalizedCatalogCode(raw string) string {
 // collectionSpecsFromCatalog maps JAVBeacon's ordered source snapshot to
 // items that actually exist in the configured Silo library. Unmatched local
 // items remain eligible; the catalog is the source of local existence.
-func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibrarySync, catalog []provider.CatalogItem, p *provider.Provider, libraryID string) ([]provider.CollectionSpec, error) {
+func collectionSpecsFromCatalog(snapshot *provider.LibrarySync, catalog []provider.CatalogItem, codes map[int64]string, libraryID string) []provider.CollectionSpec {
 	byCode := map[string][]string{}
 	for _, item := range catalog {
 		if item.ContentID == "" || item.Type != "movie" {
@@ -290,13 +294,7 @@ func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibraryS
 	for _, entry := range snapshot.Watchlist {
 		code := strings.TrimSuffix(filepath.Base(entry.Path), filepath.Ext(entry.Path))
 		if code == "" && entry.ReleaseID > 0 {
-			metadata, err := p.GetMetadata(ctx, entry.ReleaseID)
-			if err != nil {
-				return nil, err
-			}
-			if metadata != nil {
-				code = metadata.Code
-			}
+			code = codes[entry.ReleaseID]
 		}
 		watch = appendUnique(watch, seen, code)
 	}
@@ -305,13 +303,7 @@ func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibraryS
 		ids := []string{}
 		seen = map[string]bool{}
 		for _, releaseID := range preset.ReleaseIDs {
-			metadata, err := p.GetMetadata(ctx, releaseID)
-			if err != nil {
-				return nil, err
-			}
-			if metadata != nil {
-				ids = appendUnique(ids, seen, metadata.Code)
-			}
+			ids = appendUnique(ids, seen, codes[releaseID])
 		}
 		specs = append(specs, provider.CollectionSpec{Kind: "preset", PresetID: preset.ID, Name: preset.Name, LibraryID: libraryID, MediaIDs: ids})
 	}
@@ -326,5 +318,5 @@ func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibraryS
 			}
 		}
 	}
-	return specs, nil
+	return specs
 }

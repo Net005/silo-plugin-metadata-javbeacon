@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtimehost"
 	"testing"
@@ -33,11 +32,18 @@ func TestCanonicalTaskKey(t *testing.T) {
 func TestCatalogSpecsUseLocalItemsAndPreserveOrder(t *testing.T) {
 	snapshot := &provider.LibrarySync{Watchlist: []provider.LibrarySyncItem{{Path: "/stash/SSNI-675.mp4"}, {Path: "/stash/abgd-01.wmv"}, {Path: "/stash/missing.mp4"}}}
 	catalog := []provider.CatalogItem{{ContentID: "abgd", Title: "ABGD-1", Type: "movie"}, {ContentID: "ssni", Title: "SSNI-675", Type: "movie"}, {ContentID: "other", Title: "Else", Type: "movie"}}
-	specs, err := collectionSpecsFromCatalog(context.Background(), snapshot, catalog, nil, "16")
-	if err != nil {
-		t.Fatal(err)
-	}
+	specs := collectionSpecsFromCatalog(snapshot, catalog, nil, "16")
 	if len(specs) != 1 || len(specs[0].MediaIDs) != 2 || specs[0].MediaIDs[0] != "ssni" || specs[0].MediaIDs[1] != "abgd" {
 		t.Fatalf("specs=%v", specs)
+	}
+}
+
+func TestCatalogSpecsUseSnapshotReleaseCodesForPresetMembers(t *testing.T) {
+	snapshot := &provider.LibrarySync{FilterPresets: []provider.FilterPresetCollection{{ID: 7, Name: "Debt", ReleaseIDs: []int64{12, 11}}}}
+	catalog := []provider.CatalogItem{{ContentID: "first", Title: "CODE-11", Type: "movie"}, {ContentID: "second", Title: "CODE-12", Type: "movie"}}
+	codes := map[int64]string{11: "CODE-11", 12: "CODE-12"}
+	specs := collectionSpecsFromCatalog(snapshot, catalog, codes, "16")
+	if len(specs) != 2 || len(specs[1].MediaIDs) != 2 || specs[1].MediaIDs[0] != "second" || specs[1].MediaIDs[1] != "first" {
+		t.Fatalf("preset order and membership: %+v", specs)
 	}
 }

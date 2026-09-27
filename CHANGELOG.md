@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.24] - 2026-09-27
+
+### Fixed
+
+- Use release codes supplied in JAVBeacon v1.0.259's Silo library snapshot when mapping saved-filter collections, avoiding thousands of individual metadata requests after filters begin returning local items. Retain a paginated fallback for older JAVBeacon versions.
+- Yield a partial collection batch before the scheduled-task deadline instead of failing after work has begun.
+
 ## [0.4.23] - 2026-09-27
 
 ### Changed

@@ -128,6 +128,15 @@ func (p *Provider) GetMetadata(ctx context.Context, releaseID int64) (*Metadata,
 	return c.GetMetadata(ctx, releaseID)
 }
 
+// LocalReleaseCodes returns the local release ID/code index for collection sync.
+func (p *Provider) LocalReleaseCodes(ctx context.Context) (map[int64]string, error) {
+	c, err := p.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.LocalReleaseCodes(ctx)
+}
+
 // GetStashMetadata resolves a Stash-only provider id.
 func (p *Provider) GetStashMetadata(ctx context.Context, sceneID string) (*Metadata, error) {
 	c, err := p.activeClient()
