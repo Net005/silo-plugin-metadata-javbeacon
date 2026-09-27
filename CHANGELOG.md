@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.31] - 2026-09-27
+
+### Fixed
+
+- Recover a Stash performer ID from an existing person portrait URL when Silo supplies it during person refresh. The returned detail includes the stable identity, allowing later refreshes to use it directly. Requires Silo core to pass the stored portrait source on legacy people.
+
 ## [0.4.30] - 2026-09-27
 
 ### Fixed

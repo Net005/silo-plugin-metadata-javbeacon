@@ -332,3 +332,14 @@ func TestStashPosterAndOriginalBackdropAreDistinct(t *testing.T) {
 		t.Fatalf("images=%+v", images)
 	}
 }
+
+func TestStashPersonIDFromStoredPortraitSource(t *testing.T) {
+	ids, _ := structpb.NewStruct(map[string]any{"photo_source": "https://jav.example/api/v1/integrations/performers/4731/image?api_key=secret"})
+	if got := stashPersonID(ids); got != "4731" {
+		t.Fatalf("id=%q", got)
+	}
+	bad, _ := structpb.NewStruct(map[string]any{"photo_source": "https://jav.example/api/v1/integrations/performers/4731/other"})
+	if got := stashPersonID(bad); got != "" {
+		t.Fatalf("unrelated source gave id=%q", got)
+	}
+}

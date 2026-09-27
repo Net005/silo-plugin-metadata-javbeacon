@@ -303,6 +303,18 @@ func stashPersonID(ids *structpb.Struct) string {
 			return value
 		}
 	}
+	// Silo passes the original portrait URL when an older person has no
+	// persisted Stash identity yet. Use only the stable performer image route.
+	photoSource, _ := values["photo_source"].(string)
+	parsed, err := url.Parse(photoSource)
+	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		if len(parts) >= 6 && strings.Join(parts[:4], "/") == "api/v1/integrations/performers" && parts[5] == "image" {
+			if id, err := strconv.ParseInt(parts[4], 10, 64); err == nil && id > 0 {
+				return strconv.FormatInt(id, 10)
+			}
+		}
+	}
 	return ""
 }
 
