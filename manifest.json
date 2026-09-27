@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -94,7 +94,7 @@
       "key": "connection",
       "title": "JAVBeacon Connection",
       "description": "Where to reach your JAVBeacon instance and how to authenticate to it.",
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"base_url\":{\"type\":\"string\",\"format\":\"uri\",\"minLength\":1},\"api_key\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"base_url\",\"api_key\"],\"additionalProperties\":false}",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"base_url\":{\"type\":\"string\",\"format\":\"uri\",\"minLength\":1},\"api_key\":{\"type\":\"string\",\"minLength\":1}},\"required\":[\"base_url\"],\"additionalProperties\":false}",
       "required": true,
       "admin_form": {
         "fields": [
@@ -109,9 +109,9 @@
           {
             "key": "api_key",
             "label": "API Key",
-            "description": "From JAVBeacon's Settings page.",
+            "description": "From JAVBeacon Settings. Required for a working connection; leave blank to retain a saved key.",
             "control": "ADMIN_FORM_CONTROL_PASSWORD",
-            "required": true,
+            "required": false,
             "secret": true
           }
         ]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.17] - 2026-09-27
+
+### Fixed
+
+- Stop marking the intentionally blank, redacted JAVBeacon API key field as invalid when a secret is already saved. Connection tests still verify that a usable key exists.
+
 ## [0.4.16] - 2026-09-27
 
 ### Fixed
