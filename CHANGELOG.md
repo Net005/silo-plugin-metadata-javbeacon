@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.28] - 2026-09-27
+
+### Fixed
+
+- Return real Stash performer metadata from Silo's `GetPersonDetail` refresh RPC instead of an empty result. Cast entries carry a namespaced Stash performer identity, allowing person refresh to fetch current birthdate, biography, homepage, and portrait from JAVBeacon. Existing people gain that identity on their next full release metadata refresh.
+
 ## [0.4.27] - 2026-09-27
 
 ### Fixed

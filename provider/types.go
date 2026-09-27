@@ -72,6 +72,15 @@ type PerformerDetail struct {
 	Birthdate string `json:"birthdate,omitempty"`
 }
 
+// PerformerBio is JAVBeacon's authenticated Stash performer detail response.
+type PerformerBio struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Birthdate string `json:"birthdate,omitempty"`
+	DeathDate string `json:"death_date,omitempty"`
+	Details   string `json:"details,omitempty"`
+}
+
 // PlaybackEvent mirrors JAVBeacon's internal/jellyfin.PlaybackEvent JSON shape
 // (already provider-agnostic) for POST /api/v1/integrations/silo/playback.
 // ReleaseID and StashSceneID follow the same either/or rule as the server

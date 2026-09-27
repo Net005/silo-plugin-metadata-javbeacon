@@ -285,12 +285,46 @@ func (s *metadataServer) personWorker() {
 	}
 }
 
-// Silo's current PersonRecord cannot carry a Stash performer ID, birthdate,
-// or homepage into GetPersonDetail. The background admin API patch above
-// supplies the requested person fields; there is no stable ID to resolve in
-// this RPC. Releases have no season/episode structure.
-func (s *metadataServer) GetPersonDetail(context.Context, *pluginv1.GetPersonDetailRequest) (*pluginv1.GetPersonDetailResponse, error) {
-	return &pluginv1.GetPersonDetailResponse{}, nil
+// PersonRecord has no custom provider_ids field. Store the namespaced Stash
+// identity in plex_guid so Silo can pass it back in GetPersonDetail. The
+// namespaced value is never a real Plex GUID.
+func stashPersonID(ids *structpb.Struct) string {
+	if ids == nil {
+		return ""
+	}
+	values := ids.AsMap()
+	for _, key := range []string{stashSceneIDProviderKeyLower, capabilityID, "plex", "plex_guid"} {
+		value, _ := values[key].(string)
+		value = strings.TrimSpace(value)
+		if id, ok := strings.CutPrefix(value, "stash:"); ok && id != "" {
+			return id
+		}
+		if key == stashSceneIDProviderKeyLower && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *metadataServer) GetPersonDetail(ctx context.Context, req *pluginv1.GetPersonDetailRequest) (*pluginv1.GetPersonDetailResponse, error) {
+	id := stashPersonID(req.GetProviderIds())
+	if id == "" {
+		return &pluginv1.GetPersonDetailResponse{}, nil
+	}
+	bio, err := s.runtime.provider.GetPerformerBio(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	ids, _ := structpb.NewStruct(map[string]any{stashSceneIDProviderKeyLower: id, capabilityID: "stash:" + id, "plex": "stash:" + id})
+	return &pluginv1.GetPersonDetailResponse{Person: &pluginv1.PersonDetailRecord{
+		Name:        bio.Name,
+		Bio:         bio.Details,
+		BirthDate:   bio.Birthdate,
+		DeathDate:   bio.DeathDate,
+		Homepage:    s.runtime.provider.PublicURL("/api/v1/integrations/performers/" + url.PathEscape(id) + "/stash"),
+		PhotoPath:   javbeaconCanonicalPath("/api/v1/integrations/performers/" + url.PathEscape(id) + "/image"),
+		ProviderIds: ids,
+	}}, nil
 }
 
 func (s *metadataServer) GetSeasons(context.Context, *pluginv1.GetSeasonsRequest) (*pluginv1.GetSeasonsResponse, error) {
@@ -450,6 +484,9 @@ func peopleFromResult(item *provider.Metadata, performerImages map[string]string
 			Name:      name,
 			Kind:      "actor",
 			SortOrder: int32(i),
+		}
+		if detail, ok := item.PerformerDetails[name]; ok && detail.StashID != "" {
+			person.PlexGuid = "stash:" + detail.StashID
 		}
 		if path, ok := performerImages[name]; ok && path != "" {
 			person.PhotoPath = javbeaconCanonicalPath(path)

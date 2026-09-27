@@ -188,6 +188,18 @@ func (c *Client) GetMetadata(ctx context.Context, releaseID int64) (*Metadata, e
 	}
 }
 
+// GetPerformerBio fetches current Stash performer details by stable Stash ID.
+func (c *Client) GetPerformerBio(ctx context.Context, performerID string) (*PerformerBio, error) {
+	if performerID == "" {
+		return nil, fmt.Errorf("javbeacon: performer id is required")
+	}
+	var out PerformerBio
+	if err := c.getJSON(ctx, "/api/v1/integrations/performer-bio/"+url.PathEscape(performerID), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetStashMetadata fetches a Stash-only scene through JAVBeacon's integration
 // endpoint. It uses the same short-lived cache as release metadata so Silo's
 // GetMetadata and GetImages calls do not repeat the GraphQL lookup.

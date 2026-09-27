@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
 func TestSupportsItemType(t *testing.T) {
@@ -241,6 +245,43 @@ func TestStashProviderIDRoundTrip(t *testing.T) {
 	}
 	if got := metadataItemFromResult(item).GetProviderId(); got != "stash:11631" {
 		t.Fatalf("metadata provider id=%q", got)
+	}
+}
+
+func TestCastCarriesNamespacedStashPerformerIdentity(t *testing.T) {
+	item := &provider.Metadata{
+		Performers:       []string{"Minase Akari"},
+		PerformerDetails: map[string]provider.PerformerDetail{"Minase Akari": {StashID: "134", Birthdate: "2002-03-14"}},
+	}
+	people := peopleFromResult(item, nil)
+	if len(people) != 1 || people[0].GetPlexGuid() != "stash:134" {
+		t.Fatalf("cast identity = %+v", people)
+	}
+}
+
+func TestGetPersonDetailFromStashIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integrations/performer-bio/134" {
+			t.Errorf("unexpected bio lookup %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"134","name":"Akari Minase","birthdate":"2002-03-14","details":"Stash biography"}`))
+	}))
+	defer server.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: server.URL, APIKey: "test"})
+	s := &metadataServer{runtime: &runtimeServer{provider: p}}
+	ids, err := structpb.NewStruct(map[string]any{"plex": "stash:134"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.GetPersonDetail(context.Background(), &pluginv1.GetPersonDetailRequest{ProviderIds: ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := response.GetPerson()
+	if person == nil || person.GetBirthDate() != "2002-03-14" || person.GetBio() != "Stash biography" || person.GetHomepage() != server.URL+"/api/v1/integrations/performers/134/stash" || person.GetProviderIds().AsMap()["stash"] != "134" {
+		t.Fatalf("person detail = %+v", person)
 	}
 }
 

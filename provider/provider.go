@@ -146,6 +146,15 @@ func (p *Provider) GetStashMetadata(ctx context.Context, sceneID string) (*Metad
 	return c.GetStashMetadata(ctx, sceneID)
 }
 
+// GetPerformerBio fetches a Stash performer directly for Silo person refresh.
+func (p *Provider) GetPerformerBio(ctx context.Context, performerID string) (*PerformerBio, error) {
+	c, err := p.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPerformerBio(ctx, performerID)
+}
+
 // LibrarySync proxies to JAVBeacon's /api/v1/integrations/silo/library-sync.
 func (p *Provider) LibrarySync(ctx context.Context) (*LibrarySync, error) {
 	c, err := p.activeClient()
