@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.10] - 2026-09-27
+
+### Fixed
+
+- Auto-match Stash-only scenes by exact local filename when JAVBeacon has
+  no release. Send both JAVBeacon's stable `stash:<scene-id>` provider ID
+  and the Stash scene ID to Silo's match/apply API; preserve ambiguity checks
+  across all files attached to an item.
+
 ## [0.4.9] - 2026-09-27
 
 ### Changed

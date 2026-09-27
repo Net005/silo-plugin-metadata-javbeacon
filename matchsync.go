@@ -73,7 +73,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			if item.ContentType != "" && item.ContentType != "movie" {
 				continue
 			}
-			releaseID, ok, err := s.exactProviderIDForItem(ctx, siloClient, item)
+			providerID, ok, err := s.exactProviderIDForItem(ctx, siloClient, item)
 			if err != nil {
 				log.Warn("match-unmatched: filename lookup failed", "content_id", item.ContentID, "title", item.Title, "err", err)
 				failed++
@@ -84,8 +84,8 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 				skipped++
 				continue
 			}
-			if err := siloClient.ApplyMatch(ctx, item.ContentID, item.LibraryID, releaseID); err != nil {
-				log.Warn("match-unmatched: ApplyMatch failed", "content_id", item.ContentID, "release_id", releaseID, "err", err)
+			if err := siloClient.ApplyMatch(ctx, item.ContentID, item.LibraryID, providerID); err != nil {
+				log.Warn("match-unmatched: ApplyMatch failed", "content_id", item.ContentID, "provider_id", providerID, "err", err)
 				failed++
 				lastErr = err
 				continue
@@ -129,7 +129,7 @@ func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, c
 			continue
 		}
 		seen[strings.ToLower(stem)] = true
-		id, ok, err := s.exactReleaseIDForTitle(ctx, stem)
+		id, ok, err := s.exactProviderIDForTitle(ctx, stem)
 		if err != nil {
 			return "", false, err
 		}
@@ -146,12 +146,12 @@ func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, c
 	}
 	// Older Silo versions may not report media files for an unmatched item.
 	if len(paths) == 0 {
-		return s.exactReleaseIDForTitle(ctx, item.Title)
+		return s.exactProviderIDForTitle(ctx, item.Title)
 	}
 	return "", false, nil
 }
 
-// exactReleaseIDForTitle asks JAVBeacon's own search for title and accepts a
+// exactProviderIDForTitle asks JAVBeacon's own search for title and accepts a
 // hit whenever exactly one result's Code matches title exactly
 // (case-insensitively, after trimming whitespace on both sides) - or, when
 // several results share that exact code (a genuine JAVBeacon-side duplicate:
@@ -163,7 +163,7 @@ func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, c
 // back as "no confident match" rather than guessing - this task force-applies
 // a match with no score threshold to fall back on, so it must never resolve
 // an actual coin flip.
-func (s *collectionSyncTaskServer) exactReleaseIDForTitle(ctx context.Context, title string) (string, bool, error) {
+func (s *collectionSyncTaskServer) exactProviderIDForTitle(ctx context.Context, title string) (string, bool, error) {
 	needle := strings.TrimSpace(title)
 	if needle == "" {
 		return "", false, nil

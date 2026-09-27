@@ -148,3 +148,20 @@ func TestItemFilePathsPagesAllFilenames(t *testing.T) {
 		t.Fatalf("paths=%v calls=%d err=%v", paths, calls, err)
 	}
 }
+
+func TestApplyMatchSendsStashSceneProviderIDs(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := NewSiloClient(server.URL, "test-key")
+	if err := client.ApplyMatch(t.Context(), "local-1", "16", "stash:11631"); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ := gotBody["provider_ids"].(map[string]any)
+	if ids["javbeacon"] != "stash:11631" || ids["stash"] != "11631" {
+		t.Fatalf("provider_ids=%v", ids)
+	}
+}

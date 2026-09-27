@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
@@ -99,5 +102,29 @@ func TestSelectExactStashProviderID(t *testing.T) {
 	rows = append(rows, provider.Metadata{ProviderID: "stash:3", Code: "AD-359"})
 	if _, ok := selectExactStashProviderID(rows, "AD-359"); ok {
 		t.Fatal("ambiguous Stash scenes must not be forced")
+	}
+}
+
+func TestScheduledMatchSelectsStashOnlySceneByFilename(t *testing.T) {
+	jav := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integrations/silo/search" || r.URL.Query().Get("q") != "ad-359" {
+			t.Fatalf("unexpected JAVBeacon lookup %s", r.URL.String())
+		}
+		_, _ = w.Write([]byte(`{"items":[{"provider_id":"stash:11631","stash_scene_id":"11631","code":"ad-359","title":"Stash scene"}],"total":1}`))
+	}))
+	defer jav.Close()
+	silo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/files") {
+			t.Fatalf("unexpected Silo lookup %s", r.URL.String())
+		}
+		_, _ = w.Write([]byte(`{"items":[{"file_path":"/collections/jav/ad-359.avi"}],"page":{"has_more":false}}`))
+	}))
+	defer silo.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: jav.URL, APIKey: "test"})
+	task := &collectionSyncTaskServer{runtime: &runtimeServer{provider: p}}
+	id, ok, err := task.exactProviderIDForItem(t.Context(), provider.NewSiloClient(silo.URL, "test"), provider.UnmatchedItem{ContentID: "local-1", Title: "Wrong parsed title"})
+	if err != nil || !ok || id != "stash:11631" {
+		t.Fatalf("provider id=%q ok=%v err=%v", id, ok, err)
 	}
 }

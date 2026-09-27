@@ -110,24 +110,16 @@ Silo's plugin SDK (v0.15.0) actually allows:
   bypass that scoring from `Search`/`GetMetadata`, but Silo's admin REST API
   has a separate, score-free path. The `scheduled_task.v1` **"Auto-match
   unmatched JAVBeacon items"** task (id `match-unmatched`) walks
-  `GET /api/v2/libraries/unmatched-items`, re-checks each item's parsed title
-  against JAVBeacon's own search for an *exact* release-code hit, and - only
-  when that hit is unambiguous (exactly one exact, case-insensitive code
-  match, or, when JAVBeacon has two releases sharing that exact code, exactly
-  one of them strictly more fully scraped than the other - see
-  `selectExactReleaseID`/`completenessScore` in `matchsync.go`; equally
-  complete duplicates still count as ambiguous) - force-applies it directly
-  via `POST /api/v2/admin/items/{id}/match/apply`, bypassing the score
-  threshold entirely. It shares the same **Silo API key** setting as
-  `collection-sync` above and no-ops the same way without one. Run it on a
-  schedule, or manually after a library scan. Confirmed live: JAVBeacon's
-  `Search` (which
-  this task, and Silo's own scan-time matcher, both call once per unmatched
-  item) used to run a real StashApp lookup for every returned candidate -
-  fine for one interactive search, but multiplied across a whole library it
-  reduced matching to a handful of items a minute. JAVBeacon's `Search` is
-  now DB-only, so matching should complete in the time it takes to walk the
-  unmatched-items list, not days.
+  `GET /api/v2/libraries/unmatched-items`, checks each actual media filename,
+  and accepts only an unambiguous exact JAV release code or Stash scene
+  filename match. A Stash-only scene uses the stable `stash:<scene-id>`
+  provider ID and its Stash scene ID in the match/apply request. Conflicting
+  matches across files remain unmatched. The task applies confident matches
+  through `POST /api/v2/admin/items/{id}/match/apply`, bypassing Silo's score
+  threshold. It shares the **Silo API key** setting with `collection-sync`.
+  JAVBeacon uses fast exact release-code lookups and checks Stash's scene
+  index when no local release matches the filename.
+
 - **Playback events for a Stash-only scene** - wired for parity but currently
   unreachable in practice: see the playback bullet above.
 - **Not portable** - the Jellyfin Web `+1 O` activity panel is a JavaScript

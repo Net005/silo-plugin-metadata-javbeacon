@@ -148,22 +148,27 @@ func (c *SiloClient) ListUnmatchedItems(ctx context.Context, cursor string) ([]U
 }
 
 // ApplyMatch calls POST /api/v2/admin/items/{id}/match/apply, forcing Silo to
-// match contentID directly to this plugin's releaseID - bypassing Silo's own
+// match contentID directly to this plugin's release or Stash scene provider ID - bypassing Silo's own
 // fuzzy title/year confidence scoring entirely. This exists because that
 // scoring can reject a match this plugin already knows is correct (an exact
 // release-code hit via JAVBeacon's own search) purely for lacking a
 // production year on the local file, which JAV releases frequently do not
 // carry in their filename.
-func (c *SiloClient) ApplyMatch(ctx context.Context, contentID, libraryID, releaseID string) error {
+func (c *SiloClient) ApplyMatch(ctx context.Context, contentID, libraryID, providerID string) error {
 	if !c.Configured() {
 		return fmt.Errorf("silo: api key is not configured")
 	}
-	if contentID == "" || releaseID == "" {
-		return fmt.Errorf("silo: content id and release id are required")
+	if contentID == "" || providerID == "" {
+		return fmt.Errorf("silo: content id and provider id are required")
 	}
-	payload := map[string]any{
-		"provider_ids": map[string]string{"javbeacon": releaseID},
+	providerIDs := map[string]string{"javbeacon": providerID}
+	if sceneID, ok := strings.CutPrefix(providerID, "stash:"); ok {
+		if sceneID == "" {
+			return fmt.Errorf("silo: Stash scene id is required")
+		}
+		providerIDs["stash"] = sceneID
 	}
+	payload := map[string]any{"provider_ids": providerIDs}
 	if libraryID != "" {
 		payload["library_id"] = libraryID
 	}
