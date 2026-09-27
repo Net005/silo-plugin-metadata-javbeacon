@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.11] - 2026-09-27
+
+### Changed
+
+- Sync the StashApp Watchlist and JAVBeacon saved filter sets as ordered Silo v2 collections, using local matched media only. Reconcile additions, removals, and order through a one-minute background poll and the scheduled collection task.
+- Stop publishing Watchlist and saved filter membership as metadata genre tags.
+
 ## [0.4.10] - 2026-09-27
 
 ### Fixed

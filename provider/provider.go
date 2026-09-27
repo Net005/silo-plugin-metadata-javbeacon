@@ -45,7 +45,7 @@ func (p *Provider) Configure(cfg Config) {
 }
 
 // ConfigureSiloAPIKey stores the API key this plugin uses to call Silo's own
-// admin REST API (POST /api/v2/admin/items/{id}/refresh-metadata) - a
+// admin REST API (including v2 collection membership endpoints) - a
 // separate credential from the JAVBeacon connection above, since it
 // authenticates to Silo itself rather than to JAVBeacon. See the "silo_sync"
 // global config entry in manifest.json.

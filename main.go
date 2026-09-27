@@ -48,8 +48,10 @@ const stashSceneIDProviderKeyLower = "stash"
 // are unknown until an admin enters them.
 type runtimeServer struct {
 	runtimedefault.Server
-	manifest *pluginv1.PluginManifest
-	provider *provider.Provider
+	manifest       *pluginv1.PluginManifest
+	provider       *provider.Provider
+	collectionSync *collectionSyncTaskServer
+	pollOnce       sync.Once
 }
 
 func (s *runtimeServer) GetManifest(context.Context, *pluginv1.GetManifestRequest) (*pluginv1.GetManifestResponse, error) {
@@ -72,6 +74,9 @@ func (s *runtimeServer) Configure(_ context.Context, req *pluginv1.ConfigureRequ
 		case "silo_sync":
 			s.provider.ConfigureSiloAPIKey(stringValue(values["silo_api_key"]))
 		}
+	}
+	if s.collectionSync != nil {
+		s.pollOnce.Do(func() { go s.collectionSync.poll() })
 	}
 	return &pluginv1.ConfigureResponse{}, nil
 }
@@ -365,34 +370,13 @@ func searchResultFromMetadata(item *provider.Metadata) *pluginv1.ProviderSearchR
 }
 
 func metadataItemFromResult(item *provider.Metadata) *pluginv1.MetadataItem {
-	genres := append([]string(nil), item.Genres...)
-	// JAVBeacon saved filter sets ("collections" in Jellyfin) have no
-	// equivalent Silo plugin capability - metadata_provider.v1 carries no
-	// collection concept at all - so each one the release belongs to rides
-	// along as an extra, clearly-prefixed genre entry instead, which the user
-	// can filter/browse on in Silo like any other genre.
-	for _, name := range item.CollectionNames {
-		if name == "" {
+	genres := make([]string, 0, len(item.Genres))
+	for _, genre := range item.Genres {
+		label := strings.TrimSpace(genre)
+		if strings.EqualFold(label, "Watchlist") || strings.HasPrefix(strings.ToLower(label), "collection: ") {
 			continue
 		}
-		genres = append(genres, "Collection: "+name)
-	}
-	// Same substitute as above, for the one JAVBeacon "collection" that isn't
-	// a saved filter set: Silo has no favorites/watchlist marker of its own
-	// for this plugin to set, so Watchlist membership rides along as a plain
-	// genre entry too, filterable/browsable the same way.
-	// The Stash scene's own tags may already include the Watchlist label.
-	// Keep one copy when present and remove a stale genre after Stash removes
-	// its authoritative tag.
-	filtered := genres[:0]
-	for _, genre := range genres {
-		if !strings.EqualFold(strings.TrimSpace(genre), "Watchlist") {
-			filtered = append(filtered, genre)
-		}
-	}
-	genres = filtered
-	if item.Watchlist {
-		genres = append(genres, "Watchlist")
+		genres = append(genres, genre)
 	}
 	out := &pluginv1.MetadataItem{
 		ProviderId:    metadataProviderID(item),
@@ -515,6 +499,7 @@ func main() {
 	ms := &metadataServer{runtime: rs, log: logger}
 	ws := &watchSyncServer{runtime: rs}
 	cs := &collectionSyncTaskServer{runtime: rs, log: logger}
+	rs.collectionSync = cs
 
 	runtime.Serve(runtime.ServeConfig{
 		Logger: logger,

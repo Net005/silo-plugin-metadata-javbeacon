@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -60,21 +60,27 @@
       "display_name": "JAVBeacon Playback Sync",
       "description": "Reports playback progress and completion back to your self-hosted JAVBeacon instance, which forwards it on to StashApp (play count, O count, resume position).",
       "watch_sync_provider": {
-        "auth_methods": ["WATCH_SYNC_AUTH_METHOD_API_KEY"],
+        "auth_methods": [
+          "WATCH_SYNC_AUTH_METHOD_API_KEY"
+        ],
         "export_watched": true,
         "import_watched": true,
         "import_watchlist": true,
         "scrobble_playback": true,
-        "supported_media_types": ["WATCH_SYNC_MEDIA_TYPE_MOVIE"],
-        "external_id_namespaces": ["javbeacon"],
+        "supported_media_types": [
+          "WATCH_SYNC_MEDIA_TYPE_MOVIE"
+        ],
+        "external_id_namespaces": [
+          "javbeacon"
+        ],
         "max_batch_size": 25
       }
     },
     {
       "type": "scheduled_task.v1",
       "id": "collection-sync",
-      "display_name": "Sync JAVBeacon collection tags",
-      "description": "Silo has no plugin API to push updated metadata into an already-matched item, so this task polls JAVBeacon for saved-filter-set membership changes and asks Silo to refresh metadata (Silo's own POST /api/v2/admin/items/{id}/refresh-metadata) for every affected, already-matched item. Run it on a schedule from Silo's Scheduled Tasks page, or trigger it manually after editing a saved filter set."
+      "display_name": "Sync JAVBeacon collections",
+      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background and can be scheduled as a safety pass."
     },
     {
       "type": "scheduled_task.v1",
@@ -113,8 +119,8 @@
     },
     {
       "key": "silo_sync",
-      "title": "Collection Tag Sync",
-      "description": "Lets this plugin call Silo's own admin API to refresh metadata on items whose JAVBeacon saved-filter-set (collection tag) membership changed - required only for the \"Sync JAVBeacon collection tags\" scheduled task.",
+      "title": "Silo Collection Sync",
+      "description": "Silo API key for creating and updating ordered Watchlist and saved filter set collections.",
       "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"}},\"additionalProperties\":false}",
       "required": false,
       "admin_form": {
@@ -122,7 +128,7 @@
           {
             "key": "silo_api_key",
             "label": "Silo API Key",
-            "description": "An API key for this Silo server itself (Admin → Users → API Keys), used only to call Silo's own refresh-metadata endpoint for items this plugin already matched. Leave blank to disable the scheduled task (it will no-op with a clear log message rather than fail).",
+            "description": "An API key for this Silo server (Admin → Users → API Keys), used to manage collections and auto-match unmatched items.",
             "control": "ADMIN_FORM_CONTROL_PASSWORD",
             "required": false,
             "secret": true

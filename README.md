@@ -38,21 +38,7 @@ Silo's plugin SDK (v0.15.0) actually allows:
   JAVBeacon has no "favorites" concept distinct from its watchlist, and no
   resume/progress position in this snapshot, so those two state kinds are
   never populated.
-- **Collection membership and Watchlist as genre tags** - Jellyfin gets a
-  real collection per JAVBeacon saved filter set; Silo's plugin SDK has no
-  collection-management capability at all (checked directly against v0.15.0's
-  capability list), so there is no way to create or maintain a Silo
-  collection from a plugin. As the closest available substitute,
-  `GetMetadata` appends one `"Collection: <name>"` genre entry per saved
-  filter set the release currently belongs to, plus a plain `"Watchlist"`
-  genre entry when its StashApp scene has the configured Watchlist tag
-  (falling back to JAVBeacon's mirror if StashApp is unavailable; Silo has no
-  favorites/watchlist marker of its own for this plugin to set instead) -
-  both filterable in Silo like any other genre. A saved filter set's name is
-  sanitized before becoming a genre value (whitespace/control characters
-  collapsed, capped at 80 characters) since it's free text an admin typed
-  into JAVBeacon's web UI; JAVBeacon's own Jellyfin collection name is
-  unaffected by this.
+- **Silo collections** - the StashApp Watchlist and each JAVBeacon saved filter set become real, ordered Silo collections in each matched library. Watchlist follows the StashApp scene update order (newest first); saved filter sets follow JAVBeacon's resolved order. Only local Silo items matched by this plugin are included. A one-minute background poll applies changes, and the `collection-sync` scheduled task provides a manual and scheduled reconciliation path. The plugin owns only collections bearing its stable slug and description marker.
 - **Stash metadata/image gap-fill** - as of JAVBeacon v1.0.239, served by
   JAVBeacon's own dedicated `internal/silo.Service` (previously this reused
   `internal/jellyfin.Service` directly; see "Independent from the Jellyfin
@@ -76,30 +62,7 @@ Silo's plugin SDK (v0.15.0) actually allows:
   same `javbeacon://` scheme as posters/backdrops) for every performer
   StashApp has a photo for, looked up by name against the release's linked
   Stash scene.
-- **Collection/Watchlist genre tags, kept (best-effort) in sync** -
-  Jellyfin gets a real collection per JAVBeacon saved filter set; Silo's
-  plugin SDK has no collection-management capability at all (checked directly
-  against v0.15.0's capability list), so there is no way to create or
-  maintain a Silo collection from a plugin. As the closest available
-  substitute, `GetMetadata` appends one `"Collection: <name>"` genre entry per
-  saved filter set the release currently belongs to, plus `"Watchlist"` when
-  applicable, both filterable in Silo like any other genre. Genres are a
-  snapshot taken whenever Silo happens
-  to call `GetMetadata` - there is no host API for a plugin to push updated
-  metadata or invalidate an already-matched item (checked `RuntimeHost`
-  directly: nothing like Jellyfin's `ICollectionManager` exists), so a preset
-  change sits stale until something makes Silo re-fetch that item. The
-  `scheduled_task.v1` **"Sync JAVBeacon collection tags"** task (id
-  `collection-sync`) closes most of that gap: it polls JAVBeacon's
-  `jellyfin_library_revision` (the same signal the Jellyfin plugin's
-  background loop polls) and, when it moved, calls Silo's own
-  `POST /api/v2/admin/items/{id}/refresh-metadata` for every already-matched
-  item. It needs a **Silo API key** in this plugin's "Collection Tag Sync"
-  setting (Admin → Users → API Keys on your Silo server) - without one it
-  no-ops with a clear reason in its task output rather than failing. Run it on
-  a schedule from Silo's own Scheduled Tasks page, or trigger it manually
-  after editing a saved filter set. This is still poll-based, not realtime;
-  set the schedule as tight as you're comfortable with.
+- **Collection synchronization** - Configure the Silo API key under **Silo Collection Sync**. The plugin uses Silo's v2 admin collection API to create collections, add and remove members, and preserve source order. It also clears members when a saved filter set is removed. Metadata genres no longer include generated Watchlist or collection tags.
 - **Auto-matching items Silo's own scorer rejects** - confirmed live: Silo's
   scan-time matcher scores every candidate against the local file's title
   *and year*, and JAV releases routinely have no production year anywhere in
@@ -186,7 +149,7 @@ plugin never read (`tags`, `performer_ids`) simply stopped being sent.
 
 The `collection-sync` and `match-unmatched` scheduled tasks additionally call
 three of Silo's own admin REST endpoints (not JAVBeacon's), which is why both
-need a Silo API key configured: `POST /api/v2/admin/items/{id}/refresh-metadata`,
+need a Silo API key configured: `/api/v2/admin/collections` (including members and order),
 `GET /api/v2/libraries/unmatched-items`, and
 `POST /api/v2/admin/items/{id}/match/apply`.
 

@@ -169,53 +169,11 @@ func TestMetadataItemFromResultNoStudio(t *testing.T) {
 	}
 }
 
-// TestMetadataItemFromResultAddsCollectionAndWatchlistGenres guards the
-// genre/tag substitute for the two JAVBeacon-side concepts Silo's plugin SDK
-// has no first-class capability for: saved filter sets ("Collection: <name>")
-// and Watchlist membership ("Watchlist") - both ride along as plain Genres
-// entries since Silo has no collection-management or favorites/watchlist
-// marker of its own for this plugin to set instead.
-func TestMetadataItemFromResultAddsCollectionAndWatchlistGenres(t *testing.T) {
-	item := &provider.Metadata{
-		ReleaseID:       1,
-		Code:            "X",
-		Genres:          []string{"drama"},
-		CollectionNames: []string{"My Favorites", "", "Second Set"},
-		Watchlist:       true,
-	}
+func TestMetadataItemFromResultExcludesCollectionAndWatchlistTags(t *testing.T) {
+	item := &provider.Metadata{Code: "X", Genres: []string{"Drama", "Watchlist", "Collection: Old"}, CollectionNames: []string{"New"}, Watchlist: true}
 	out := metadataItemFromResult(item)
-	want := []string{"drama", "Collection: My Favorites", "Collection: Second Set", "Watchlist"}
-	if len(out.Genres) != len(want) {
-		t.Fatalf("Genres = %v, want %v", out.Genres, want)
-	}
-	for i, g := range want {
-		if out.Genres[i] != g {
-			t.Errorf("Genres[%d] = %q, want %q", i, out.Genres[i], g)
-		}
-	}
-}
-
-func TestMetadataItemFromResultOmitsWatchlistGenreWhenNotWatchlisted(t *testing.T) {
-	item := &provider.Metadata{ReleaseID: 1, Code: "X", Genres: []string{"Watchlist", "Drama"}, Watchlist: false}
-	out := metadataItemFromResult(item)
-	for _, g := range out.Genres {
-		if g == "Watchlist" {
-			t.Fatalf("Genres = %v, must not contain Watchlist when item.Watchlist is false", out.Genres)
-		}
-	}
-}
-
-func TestMetadataItemFromResultDoesNotDuplicateStashWatchlistGenre(t *testing.T) {
-	item := &provider.Metadata{Code: "X", Genres: []string{"Drama", "Watchlist"}, Watchlist: true}
-	out := metadataItemFromResult(item)
-	count := 0
-	for _, genre := range out.Genres {
-		if genre == "Watchlist" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("Watchlist genre count=%d in %v", count, out.Genres)
+	if len(out.Genres) != 1 || out.Genres[0] != "Drama" {
+		t.Fatalf("Genres=%v", out.Genres)
 	}
 }
 

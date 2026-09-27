@@ -18,35 +18,17 @@ import (
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
 )
 
-// collectionSyncTaskServer implements scheduled_task.v1 (id "collection-sync").
-//
-// Why this exists: Silo's plugin SDK gives a metadata_provider.v1 plugin no
-// way to push updated metadata into an item Silo already matched, and no
-// "this item changed, re-fetch it" notification RPC either (checked
-// RuntimeHost directly - PublishEvent only reaches other plugins subscribed
-// to it, not Silo's own metadata pipeline). So a saved filter set's
-// membership change - which changes the "Collection: <name>" genre tags
-// GetMetadata returns - sits stale in Silo until something makes Silo call
-// GetMetadata again.
-//
-// This task closes that gap the only way available: it polls JAVBeacon's
-// jellyfin_library_revision (the same change-detection signal the Jellyfin
-// plugin's own background loop polls), and when it moved, calls Silo's own
-// POST /api/v2/admin/items/{id}/refresh-metadata for every item this plugin
-// can map to a JAVBeacon release via RuntimeHost.ListLibraryMedia. It is not
-// realtime - it only runs when Silo (or its admin) triggers this scheduled
-// task - but it is the closest available substitute to the push-based sync
-// Jellyfin's in-process plugin gets from ICollectionManager.
+// collectionSyncTaskServer maintains ordered Silo collections for the StashApp
+// Watchlist and JAVBeacon saved filter sets. The same sync runs on a schedule
+// and from a short revision polling loop.
 type collectionSyncTaskServer struct {
 	pluginv1.UnimplementedScheduledTaskServer
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log                       hclog.Logger
-	mu                        sync.Mutex
-	running                   map[string]bool
-	previousWatchlist         map[string]bool
-	previousWatchlistReleases map[int64]bool
+	log     hclog.Logger
+	mu      sync.Mutex
+	running map[string]bool
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -107,166 +89,139 @@ func (s *collectionSyncTaskServer) Run(_ context.Context, req *pluginv1.RunSched
 	return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
 }
 
-func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, error) {
-	log := s.logger()
-	librarySyncStart := time.Now()
-	sync, err := s.runtime.provider.LibrarySync(ctx)
-	log.Info("collection-sync: JAVBeacon LibrarySync call finished", "elapsed", time.Since(librarySyncStart), "err", err)
-	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}, err
-	}
-	if sync.Revision != "" && sync.Revision == s.runtime.provider.LastSyncedRevision() {
-		return map[string]any{"status": "unchanged", "revision": sync.Revision}, nil
-	}
-
-	// Refresh every release that currently needs a derived genre. Watchlist
-	// membership is independent of saved filter sets, so it must be included
-	// even when no filter sets exist.
-	releaseIDs := collectionReleaseIDs(sync)
-	stashSceneIDs := map[string]bool{}
-	currentWatchlist := map[string]bool{}
-	currentWatchlistReleases := map[int64]bool{}
-	for _, item := range sync.Watchlist {
-		if item.ReleaseID > 0 {
-			currentWatchlistReleases[item.ReleaseID] = true
+func (s *collectionSyncTaskServer) poll() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	// Configure can precede the RuntimeHost broker binding; the first tick retries.
+	for range ticker.C {
+		s.mu.Lock()
+		if s.running == nil {
+			s.running = make(map[string]bool)
 		}
-		if item.StashSceneID != "" {
-			stashSceneIDs[item.StashSceneID] = true
-			currentWatchlist[item.StashSceneID] = true
+		busy := s.running["collection-sync"]
+		if !busy {
+			s.running["collection-sync"] = true
 		}
-	}
-	s.mu.Lock()
-	for sceneID := range s.previousWatchlist {
-		stashSceneIDs[sceneID] = true // Refresh removals too.
-	}
-	for releaseID := range s.previousWatchlistReleases {
-		releaseIDs[releaseID] = true
-	}
-	s.mu.Unlock()
-
-	host := sdkruntime.Host()
-	if host == nil {
-		log.Error("collection-sync: sdkruntime.Host() returned nil - broker not bound yet, or a prior dial failed and was never retried")
-		return map[string]any{"status": "error", "error": "runtime host is not bound"}, fmt.Errorf("collection-sync: runtime host is not bound")
-	}
-	siloKey := s.runtime.provider.SiloAPIKey()
-	if siloKey == "" {
-		// Keep the revision pending so configuring a key later still applies
-		// the current collection memberships.
-		return map[string]any{"status": "skipped", "reason": "no Silo API key configured (see this plugin's Collection Tag Sync setting)"}, nil
-	}
-	// GetHostInfo is a RuntimeHost RPC call FROM this plugin BACK INTO the
-	// Silo host, over the same broker stream the host used to invoke this
-	// very Run() call - see runtime.go's pluginHostState doc comment in the
-	// vendored SDK. If Silo enforces a deadline on the whole Run() RPC (the
-	// leading hypothesis for the "fails after exactly 10s" reports - see
-	// this task's own tracking notes), a slow or blocked call here is
-	// exactly where that deadline would fire. Timing and logging it
-	// separately from the RefreshItemMetadata loop below is what will
-	// actually distinguish those two hypotheses next time this happens.
-	hostInfoStart := time.Now()
-	hostInfo, err := host.GetHostInfo(ctx)
-	log.Info("collection-sync: RuntimeHost.GetHostInfo call finished", "elapsed", time.Since(hostInfoStart), "err", err, "ctx_err", ctx.Err())
-	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}, err
-	}
-	siloClient := provider.NewSiloClient(hostInfo.InternalBaseURL, siloKey)
-
-	listMediaStart := time.Now()
-	mediaIDs, err := mapReleaseIDsToMediaIDs(ctx, host, releaseIDs, stashSceneIDs)
-	log.Info("collection-sync: RuntimeHost.ListLibraryMedia paging finished", "elapsed", time.Since(listMediaStart), "matched_items", len(mediaIDs), "err", err)
-	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}, err
-	}
-
-	refreshed, failed := 0, 0
-	var lastErr error
-	for _, mediaID := range mediaIDs {
-		itemStart := time.Now()
-		if err := siloClient.RefreshItemMetadata(ctx, mediaID); err != nil {
-			log.Warn("collection-sync: RefreshItemMetadata failed", "media_id", mediaID, "elapsed", time.Since(itemStart), "err", err)
-			failed++
-			lastErr = err
+		s.mu.Unlock()
+		if busy {
 			continue
 		}
-		refreshed++
-	}
-	if lastErr == nil {
-		s.runtime.provider.SetLastSyncedRevision(sync.Revision)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		_, err := s.sync(ctx)
+		cancel()
+		if err != nil {
+			s.logger().Warn("collection poll failed", "err", err)
+		}
 		s.mu.Lock()
-		s.previousWatchlist = currentWatchlist
-		s.previousWatchlistReleases = currentWatchlistReleases
+		delete(s.running, "collection-sync")
 		s.mu.Unlock()
 	}
-
-	summary := map[string]any{
-		"status":         "ok",
-		"revision":       sync.Revision,
-		"matched_items":  len(mediaIDs),
-		"refreshed":      refreshed,
-		"failed":         failed,
-		"tracked_in_any": len(releaseIDs),
-	}
-	if lastErr != nil {
-		summary["status"] = "partial_failure"
-		summary["last_error"] = lastErr.Error()
-		return summary, lastErr
-	}
-	return summary, nil
 }
 
-// mapReleaseIDsToMediaIDs pages through RuntimeHost.ListLibraryMedia looking
-// for items this plugin itself matched (external_provider=="javbeacon"),
-// returning the Silo media IDs for whichever of releaseIDs it finds. Items
-// Silo hasn't matched to a JAVBeacon release at all are naturally absent from
-// both the input set's hits and the output - there is nothing to refresh for
-// them.
-func mapReleaseIDsToMediaIDs(ctx context.Context, host *runtimehost.Client, releaseIDs map[int64]bool, stashSceneIDs map[string]bool) ([]string, error) {
-	var mediaIDs []string
-	pageToken := ""
+func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, error) {
+	snapshot, err := s.runtime.provider.LibrarySync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	host := sdkruntime.Host()
+	if host == nil {
+		return nil, fmt.Errorf("collection-sync: runtime host is not bound")
+	}
+	key := s.runtime.provider.SiloAPIKey()
+	if key == "" {
+		return map[string]any{"status": "skipped", "reason": "Silo API key is not configured"}, nil
+	}
+	hostInfo, err := host.GetHostInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	media, err := listJAVMedia(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	specs := collectionSpecs(snapshot, media)
+	changed, err := provider.NewSiloClient(hostInfo.InternalBaseURL, key).SyncCollections(ctx, specs)
+	if err != nil {
+		return map[string]any{"status": "error", "error": err.Error()}, err
+	}
+	s.runtime.provider.SetLastSyncedRevision(snapshot.Revision)
+	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed}, nil
+}
+
+func listJAVMedia(ctx context.Context, host *runtimehost.Client) ([]runtimehost.CatalogMediaItem, error) {
+	var items []runtimehost.CatalogMediaItem
+	token := ""
 	for {
-		resp, err := host.ListLibraryMedia(ctx, runtimehost.ListLibraryMediaRequest{PageSize: 200, PageToken: pageToken})
+		resp, err := host.ListLibraryMedia(ctx, runtimehost.ListLibraryMediaRequest{PageSize: 200, PageToken: token})
 		if err != nil {
 			return nil, fmt.Errorf("list library media: %w", err)
 		}
 		for _, item := range resp.Items {
-			if item.ExternalProvider != capabilityID {
-				continue
-			}
-			id, err := strconv.ParseInt(item.ExternalID, 10, 64)
-			if err == nil && releaseIDs[id] {
-				mediaIDs = append(mediaIDs, item.MediaID)
-				continue
-			}
-			if strings.HasPrefix(item.ExternalID, "stash:") && stashSceneIDs[strings.TrimPrefix(item.ExternalID, "stash:")] {
-				mediaIDs = append(mediaIDs, item.MediaID)
+			if item.ExternalProvider == capabilityID {
+				items = append(items, item)
 			}
 		}
 		if resp.NextPageToken == "" {
 			break
 		}
-		pageToken = resp.NextPageToken
+		token = resp.NextPageToken
 	}
-	return mediaIDs, nil
+	return items, nil
 }
 
-// collectionReleaseIDs collects both sources of Silo's derived genre tags.
-func collectionReleaseIDs(snapshot *provider.LibrarySync) map[int64]bool {
-	ids := map[int64]bool{}
+func collectionSpecs(snapshot *provider.LibrarySync, media []runtimehost.CatalogMediaItem) []provider.CollectionSpec {
 	if snapshot == nil {
-		return ids
+		return nil
 	}
-	for _, item := range snapshot.Watchlist {
-		if item.ReleaseID > 0 {
-			ids[item.ReleaseID] = true
+	byRelease := map[string]map[int64][]string{}
+	byScene := map[string]map[string][]string{}
+	libraries := map[string]bool{}
+	for _, item := range media {
+		if item.MediaID == "" || item.LibraryID == "" {
+			continue
+		}
+		libraries[item.LibraryID] = true
+		if byRelease[item.LibraryID] == nil {
+			byRelease[item.LibraryID] = map[int64][]string{}
+			byScene[item.LibraryID] = map[string][]string{}
+		}
+		if id, err := strconv.ParseInt(item.ExternalID, 10, 64); err == nil && id > 0 {
+			byRelease[item.LibraryID][id] = append(byRelease[item.LibraryID][id], item.MediaID)
+		}
+		if strings.HasPrefix(item.ExternalID, "stash:") {
+			byScene[item.LibraryID][strings.TrimPrefix(item.ExternalID, "stash:")] = append(byScene[item.LibraryID][strings.TrimPrefix(item.ExternalID, "stash:")], item.MediaID)
 		}
 	}
-	for _, preset := range snapshot.FilterPresets {
-		for _, id := range preset.ReleaseIDs {
-			if id > 0 {
-				ids[id] = true
+	var specs []provider.CollectionSpec
+	for lib := range libraries {
+		seen := map[string]bool{}
+		watch := []string{}
+		for _, entry := range snapshot.Watchlist {
+			ids := byRelease[lib][entry.ReleaseID]
+			if len(ids) == 0 && entry.StashSceneID != "" {
+				ids = byScene[lib][entry.StashSceneID]
+			}
+			for _, id := range ids {
+				if !seen[id] {
+					watch = append(watch, id)
+					seen[id] = true
+				}
 			}
 		}
+		specs = append(specs, provider.CollectionSpec{Kind: "watchlist", Name: "Watchlist", LibraryID: lib, MediaIDs: watch})
+		for _, preset := range snapshot.FilterPresets {
+			seen = map[string]bool{}
+			ids := []string{}
+			for _, releaseID := range preset.ReleaseIDs {
+				for _, id := range byRelease[lib][releaseID] {
+					if !seen[id] {
+						ids = append(ids, id)
+						seen[id] = true
+					}
+				}
+			}
+			specs = append(specs, provider.CollectionSpec{Kind: "preset", PresetID: preset.ID, Name: preset.Name, LibraryID: lib, MediaIDs: ids})
+		}
 	}
-	return ids
+	return specs
 }

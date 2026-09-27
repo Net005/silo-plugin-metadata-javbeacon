@@ -49,9 +49,8 @@ type Metadata struct {
 	SourceURL          string `json:"source_url,omitempty"`
 	// CollectionNames lists every JAVBeacon saved filter set this release
 	// currently belongs to, only populated on the single-release fetch
-	// (GetMetadata). Silo has no collection-management plugin capability, so
-	// this plugin surfaces membership as extra Genres entries instead - see
-	// metadataItemFromResult in main.go.
+	// (GetMetadata). Ordered Silo collections are synchronized separately
+	// from the library-sync snapshot.
 	CollectionNames []string `json:"collection_names,omitempty"`
 	// PerformerImages maps a performer's display name (as it appears in
 	// Performers) to a JAVBeacon-proxied StashApp portrait URL - see
@@ -62,10 +61,7 @@ type Metadata struct {
 	// Watchlist mirrors JAVBeacon's own Watchlist membership for this
 	// release, unlike CollectionNames/PerformerImages it costs JAVBeacon
 	// nothing extra to populate and is present on every fetch, including
-	// search results. Silo has no favorites/watchlist marker of its own for
-	// this plugin to set instead, so metadataItemFromResult surfaces it the
-	// same way saved-filter-set membership already is: an extra Genres
-	// entry.
+	// search results. The collection sync uses the ordered library snapshot.
 	Watchlist   bool              `json:"watchlist"`
 	ProviderIDs map[string]string `json:"provider_ids"`
 }
