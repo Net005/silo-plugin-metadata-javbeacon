@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5] - 2026-09-27
+
+### Fixed
+
+- Skip JAVBeacon searches for ordinary titles in the unmatched-items task;
+  only release-code titles can pass its exact-match check.
+
 ## [0.4.4] - 2026-09-27
 
 ### Added

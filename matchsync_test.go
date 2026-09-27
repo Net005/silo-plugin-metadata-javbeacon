@@ -89,3 +89,16 @@ func TestSelectExactReleaseIDTrimsWhitespace(t *testing.T) {
 		t.Fatalf("selectExactReleaseID = (%d, %v), want (9001, true)", id, ok)
 	}
 }
+
+func TestLooksLikeReleaseCode(t *testing.T) {
+	for _, title := range []string{"ADN-131", "abgd-01"} {
+		if !looksLikeReleaseCode(title) {
+			t.Fatalf("missed code %q", title)
+		}
+	}
+	for _, title := range []string{"", "A movie title", "072 squadron - g rangers -cg", "no-digits"} {
+		if looksLikeReleaseCode(title) {
+			t.Fatalf("accepted non-code %q", title)
+		}
+	}
+}

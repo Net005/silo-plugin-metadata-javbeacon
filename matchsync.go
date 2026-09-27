@@ -125,7 +125,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 // an actual coin flip.
 func (s *collectionSyncTaskServer) exactReleaseIDForTitle(ctx context.Context, title string) (string, bool, error) {
 	needle := strings.TrimSpace(title)
-	if needle == "" {
+	if !looksLikeReleaseCode(needle) {
 		return "", false, nil
 	}
 	results, err := s.runtime.provider.Search(ctx, needle, 10)
@@ -137,6 +137,20 @@ func (s *collectionSyncTaskServer) exactReleaseIDForTitle(ctx context.Context, t
 		return "", false, nil
 	}
 	return strconv.FormatInt(found, 10), true, nil
+}
+
+// looksLikeReleaseCode avoids a costly catalog-wide search for ordinary
+// movie titles. The task only accepts an exact release-code match anyway.
+func looksLikeReleaseCode(title string) bool {
+	if !strings.Contains(title, "-") || strings.ContainsAny(title, " \t\n") {
+		return false
+	}
+	for _, r := range title {
+		if r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // selectExactReleaseID returns the release ID of the search result whose
