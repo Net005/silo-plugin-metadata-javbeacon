@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // CollectionSpec is one saved filter set's matched Silo media in one library.
@@ -20,17 +21,30 @@ type CollectionSpec struct {
 	Name      string
 	LibraryID string
 	MediaIDs  []string
+	Artwork   []CollectionArtwork
+}
+
+// CollectionArtwork is a local collection member's existing Silo artwork.
+type CollectionArtwork struct {
+	MediaID     string
+	PosterURL   string
+	BackdropURL string
+	ReleaseDate string
+	AddedAt     string
 }
 
 const collectionOwner = "Managed by JAVBeacon metadata plugin."
 
 type siloCollection struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	GroupID     *string `json:"group_id"`
-	LibraryID   string  `json:"library_id"`
-	Slug        string  `json:"slug"`
-	Description string  `json:"description"`
+	ID           string                     `json:"id"`
+	Title        string                     `json:"title"`
+	GroupID      *string                    `json:"group_id"`
+	LibraryID    string                     `json:"library_id"`
+	Slug         string                     `json:"slug"`
+	Description  string                     `json:"description"`
+	PosterURL    string                     `json:"poster_url"`
+	BackdropURL  string                     `json:"backdrop_url"`
+	SourceConfig map[string]json.RawMessage `json:"source_config"`
 }
 
 func collectionSlug(spec CollectionSpec) string {
@@ -265,7 +279,16 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 				return changed, false, err
 			}
 		}
-
+		artChanged, err := c.syncCollectionArtwork(ctx, collection, spec, time.Now())
+		if err != nil {
+			return changed, false, err
+		}
+		if artChanged {
+			changed++
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
+		}
 	}
 	if createdAny {
 		updated, err := c.collections(ctx)

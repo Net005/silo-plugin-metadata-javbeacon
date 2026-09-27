@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.22] - 2026-09-27
+
+### Added
+
+- Rotate Silo collection posters and backdrops every three days using artwork from that collection's local members. Most picks favor recent releases, while some draw from the whole collection. Upload through Silo's artwork API and remember the chosen member IDs to avoid repeated uploads during routine syncs.
+
 ## [0.4.21] - 2026-09-27
 
 ### Changed

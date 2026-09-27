@@ -10,9 +10,13 @@ import (
 
 // CatalogItem is a local Silo item in a configured library.
 type CatalogItem struct {
-	ContentID string `json:"content_id"`
-	Title     string `json:"title"`
-	Type      string `json:"type"`
+	ContentID   string `json:"content_id"`
+	Title       string `json:"title"`
+	Type        string `json:"type"`
+	PosterURL   string `json:"poster_url"`
+	BackdropURL string `json:"backdrop_url"`
+	ReleaseDate string `json:"release_date"`
+	AddedAt     string `json:"added_at"`
 }
 
 // ListLibraryCatalog uses Silo's public v2 catalog rather than a RuntimeHost

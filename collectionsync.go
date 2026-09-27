@@ -315,5 +315,16 @@ func collectionSpecsFromCatalog(ctx context.Context, snapshot *provider.LibraryS
 		}
 		specs = append(specs, provider.CollectionSpec{Kind: "preset", PresetID: preset.ID, Name: preset.Name, LibraryID: libraryID, MediaIDs: ids})
 	}
+	artByID := make(map[string]provider.CollectionArtwork, len(catalog))
+	for _, item := range catalog {
+		artByID[item.ContentID] = provider.CollectionArtwork{MediaID: item.ContentID, PosterURL: item.PosterURL, BackdropURL: item.BackdropURL, ReleaseDate: item.ReleaseDate, AddedAt: item.AddedAt}
+	}
+	for i := range specs {
+		for _, id := range specs[i].MediaIDs {
+			if art, ok := artByID[id]; ok {
+				specs[i].Artwork = append(specs[i].Artwork, art)
+			}
+		}
+	}
 	return specs, nil
 }
