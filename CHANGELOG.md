@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.12] - 2026-09-27
+
+### Fixed
+
+- Use Silo v2 collection list without an unsupported `limit` query parameter; validated against the live server.
+
 ## [0.4.11] - 2026-09-27
 
 ### Changed

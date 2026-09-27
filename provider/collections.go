@@ -75,33 +75,13 @@ func (c *SiloClient) collectionRequest(ctx context.Context, method, path string,
 }
 
 func (c *SiloClient) collections(ctx context.Context) ([]siloCollection, error) {
-	out := []siloCollection{}
-	cursor := ""
-	for page := 0; page < 100; page++ {
-		path := "/api/v2/admin/collections?limit=200"
-		if cursor != "" {
-			path += "&cursor=" + url.QueryEscape(cursor)
-		}
-		var response struct {
-			Items []siloCollection `json:"items"`
-			Page  struct {
-				HasMore    bool   `json:"has_more"`
-				NextCursor string `json:"next_cursor"`
-			} `json:"page"`
-		}
-		if err := c.collectionRequest(ctx, http.MethodGet, path, nil, &response); err != nil {
-			return nil, err
-		}
-		out = append(out, response.Items...)
-		if !response.Page.HasMore {
-			return out, nil
-		}
-		if response.Page.NextCursor == "" || response.Page.NextCursor == cursor {
-			return nil, fmt.Errorf("silo: collection pagination did not advance")
-		}
-		cursor = response.Page.NextCursor
+	var response struct {
+		Items []siloCollection `json:"items"`
 	}
-	return nil, fmt.Errorf("silo: too many collection pages")
+	if err := c.collectionRequest(ctx, http.MethodGet, "/api/v2/admin/collections", nil, &response); err != nil {
+		return nil, err
+	}
+	return response.Items, nil
 }
 
 func (c *SiloClient) collectionMembers(ctx context.Context, id string) (map[string]int, error) {
