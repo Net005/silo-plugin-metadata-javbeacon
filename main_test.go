@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -240,5 +241,40 @@ func TestStashProviderIDRoundTrip(t *testing.T) {
 	}
 	if got := metadataItemFromResult(item).GetProviderId(); got != "stash:11631" {
 		t.Fatalf("metadata provider id=%q", got)
+	}
+}
+
+func TestPersonRefreshQueuesLatestFollowupDuringCooldown(t *testing.T) {
+	s := &metadataServer{personJobs: make(chan personJob, 3)}
+	first := personJob{name: "Minase Akari", detail: provider.PerformerDetail{StashID: "134", Birthdate: "2002-03-14"}}
+	s.enqueuePerson(first)
+	select {
+	case got := <-s.personJobs:
+		if got.detail.Birthdate != "2002-03-14" {
+			t.Fatalf("first job = %+v", got)
+		}
+	default:
+		t.Fatal("initial person update was not queued")
+	}
+	stateValue, _ := s.personSeen.Load("134")
+	state := stateValue.(*personRefreshState)
+	state.mu.Lock()
+	state.next = time.Now().Add(30 * time.Millisecond)
+	state.mu.Unlock()
+	second := personJob{name: "Minase Akari", detail: provider.PerformerDetail{StashID: "134", Birthdate: "2002-03-15"}}
+	s.enqueuePerson(first)
+	s.enqueuePerson(second)
+	select {
+	case <-s.personJobs:
+		t.Fatal("cooldown should coalesce person updates")
+	default:
+	}
+	select {
+	case got := <-s.personJobs:
+		if got.detail.Birthdate != "2002-03-15" {
+			t.Fatalf("trailing job = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("trailing person update was not queued")
 	}
 }

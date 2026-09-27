@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.27] - 2026-09-27
+
+### Fixed
+
+- Reapply Stash performer birth dates and homepage links during Silo metadata refreshes. Replace the 24-hour person suppression with a short per-person cooldown and one trailing update, so a full refresh cannot leave an existing person stale after earlier cast writes.
+
 ## [0.4.26] - 2026-09-27
 
 ### Fixed

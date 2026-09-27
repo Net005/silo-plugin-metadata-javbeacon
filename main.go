@@ -178,6 +178,18 @@ type personJob struct {
 	detail provider.PerformerDetail
 }
 
+// Silo can write the same person again during a full library refresh. Keep
+// immediate updates inexpensive, but always schedule one final patch when
+// another metadata request arrives during the per-person cooldown.
+type personRefreshState struct {
+	mu      sync.Mutex
+	next    time.Time
+	pending bool
+	latest  personJob
+}
+
+const personRefreshInterval = time.Minute
+
 func (s *metadataServer) queuePeople(item *provider.Metadata) {
 	if len(item.PerformerDetails) == 0 || s.runtime.provider.SiloAPIKey() == "" {
 		return
@@ -193,18 +205,44 @@ func (s *metadataServer) queuePeople(item *provider.Metadata) {
 		if !ok || detail.StashID == "" {
 			continue
 		}
-		next := time.Now().Add(24 * time.Hour)
-		if previous, loaded := s.personSeen.LoadOrStore(detail.StashID, next); loaded {
-			if expiry, ok := previous.(time.Time); ok && time.Now().Before(expiry) {
-				continue
-			}
-			s.personSeen.Store(detail.StashID, next)
-		}
-		select {
-		case s.personJobs <- personJob{name: name, detail: detail}:
-		default:
-			s.personSeen.Delete(detail.StashID)
-		}
+		s.enqueuePerson(personJob{name: name, detail: detail})
+	}
+}
+
+func (s *metadataServer) enqueuePerson(job personJob) {
+	value, _ := s.personSeen.LoadOrStore(job.detail.StashID, &personRefreshState{})
+	state := value.(*personRefreshState)
+	state.mu.Lock()
+	state.latest = job
+	if state.pending {
+		state.mu.Unlock()
+		return
+	}
+	if delay := time.Until(state.next); delay > 0 {
+		state.pending = true
+		state.mu.Unlock()
+		time.AfterFunc(delay, func() { s.flushPerson(state) })
+		return
+	}
+	state.next = time.Now().Add(personRefreshInterval)
+	state.mu.Unlock()
+	s.sendPersonJob(job)
+}
+
+func (s *metadataServer) flushPerson(state *personRefreshState) {
+	state.mu.Lock()
+	job := state.latest
+	state.pending = false
+	state.next = time.Now().Add(personRefreshInterval)
+	state.mu.Unlock()
+	s.sendPersonJob(job)
+}
+
+func (s *metadataServer) sendPersonJob(job personJob) {
+	select {
+	case s.personJobs <- job:
+	default:
+		s.personSeen.Delete(job.detail.StashID)
 	}
 }
 
