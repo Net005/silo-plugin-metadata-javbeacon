@@ -125,7 +125,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 // an actual coin flip.
 func (s *collectionSyncTaskServer) exactReleaseIDForTitle(ctx context.Context, title string) (string, bool, error) {
 	needle := strings.TrimSpace(title)
-	if !looksLikeReleaseCode(needle) {
+	if needle == "" {
 		return "", false, nil
 	}
 	results, err := s.runtime.provider.Search(ctx, needle, 10)
@@ -133,24 +133,27 @@ func (s *collectionSyncTaskServer) exactReleaseIDForTitle(ctx context.Context, t
 		return "", false, err
 	}
 	found, ok := selectExactReleaseID(results, needle)
-	if !ok {
-		return "", false, nil
+	if ok {
+		return strconv.FormatInt(found, 10), true, nil
 	}
-	return strconv.FormatInt(found, 10), true, nil
+	// A Stash-only scene has a stable provider ID but no JAVBeacon release ID.
+	// Accept it only when exactly one scene's code/file stem matches.
+	providerID, ok := selectExactStashProviderID(results, needle)
+	return providerID, ok, nil
 }
 
-// looksLikeReleaseCode avoids a costly catalog-wide search for ordinary
-// movie titles. The task only accepts an exact release-code match anyway.
-func looksLikeReleaseCode(title string) bool {
-	if !strings.Contains(title, "-") || strings.ContainsAny(title, " \t\n") {
-		return false
-	}
-	for _, r := range title {
-		if r >= '0' && r <= '9' {
-			return true
+func selectExactStashProviderID(results []provider.Metadata, needle string) (string, bool) {
+	providerID := ""
+	for _, result := range results {
+		if !strings.EqualFold(strings.TrimSpace(result.Code), strings.TrimSpace(needle)) || !strings.HasPrefix(result.ProviderID, "stash:") {
+			continue
 		}
+		if providerID != "" {
+			return "", false
+		}
+		providerID = result.ProviderID
 	}
-	return false
+	return providerID, providerID != ""
 }
 
 // selectExactReleaseID returns the release ID of the search result whose

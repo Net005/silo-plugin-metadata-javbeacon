@@ -47,6 +47,7 @@ type Client struct {
 	httpClient    *http.Client
 	cacheMu       sync.Mutex
 	metadataCache map[int64]cachedMetadata
+	stashCache    map[string]cachedMetadata
 	inflight      map[int64]chan struct{}
 }
 
@@ -187,10 +188,38 @@ func (c *Client) GetMetadata(ctx context.Context, releaseID int64) (*Metadata, e
 	}
 }
 
+// GetStashMetadata fetches a Stash-only scene through JAVBeacon's integration
+// endpoint. It uses the same short-lived cache as release metadata so Silo's
+// GetMetadata and GetImages calls do not repeat the GraphQL lookup.
+func (c *Client) GetStashMetadata(ctx context.Context, sceneID string) (*Metadata, error) {
+	c.cacheMu.Lock()
+	if entry, ok := c.stashCache[sceneID]; ok && time.Now().Before(entry.expires) {
+		c.cacheMu.Unlock()
+		return entry.item, nil
+	}
+	c.cacheMu.Unlock()
+	var out Metadata
+	err := c.getJSON(ctx, "/api/v1/integrations/silo/stash/scenes/"+url.PathEscape(sceneID), &out)
+	if err != nil {
+		return nil, err
+	}
+	c.cacheMu.Lock()
+	if c.stashCache == nil {
+		c.stashCache = map[string]cachedMetadata{}
+	}
+	if len(c.stashCache) >= 2048 {
+		c.stashCache = map[string]cachedMetadata{}
+	}
+	c.stashCache[sceneID] = cachedMetadata{item: &out, expires: time.Now().Add(5 * time.Minute)}
+	c.cacheMu.Unlock()
+	return &out, nil
+}
+
 // ClearMetadataCache makes a collection revision refresh fetch fresh genres.
 func (c *Client) ClearMetadataCache() {
 	c.cacheMu.Lock()
 	c.metadataCache = nil
+	c.stashCache = nil
 	c.cacheMu.Unlock()
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,6 +104,17 @@ func (s *metadataServer) Search(ctx context.Context, req *pluginv1.SearchMetadat
 		return &pluginv1.SearchMetadataResponse{}, nil
 	}
 
+	if sceneID, ok := stashProviderID("", req.GetProviderIds()); ok {
+		item, err := s.runtime.provider.GetStashMetadata(ctx, sceneID)
+		if err != nil {
+			return nil, err
+		}
+		if item == nil {
+			return &pluginv1.SearchMetadataResponse{}, nil
+		}
+		return &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{searchResultFromMetadata(item)}}, nil
+	}
+
 	// A direct JAVBeacon release id (via provider_ids) skips the search
 	// endpoint entirely and fetches the one release, mirroring how TMDB's
 	// plugin prefers a direct id lookup over a title search.
@@ -136,14 +148,23 @@ func (s *metadataServer) GetMetadata(ctx context.Context, req *pluginv1.GetMetad
 	if releaseID == 0 {
 		releaseID = parseInt64(req.GetProviderId())
 	}
-	if releaseID == 0 {
-		return &pluginv1.GetMetadataResponse{}, nil
+	var item *provider.Metadata
+	var err error
+	if sceneID, ok := stashProviderID(req.GetProviderId(), req.GetProviderIds()); ok {
+		item, err = s.runtime.provider.GetStashMetadata(ctx, sceneID)
+	} else if releaseID != 0 {
+		item, err = s.runtime.provider.GetMetadata(ctx, releaseID)
 	}
-	item, err := s.runtime.provider.GetMetadata(ctx, releaseID)
 	if err != nil || item == nil {
 		return &pluginv1.GetMetadataResponse{}, err
 	}
 	s.queuePeople(item)
+	if item.ProviderID != "" && req.GetFilePath() != "" {
+		copy := *item
+		base := filepath.Base(req.GetFilePath())
+		copy.Code = strings.TrimSuffix(base, filepath.Ext(base))
+		item = &copy
+	}
 	return &pluginv1.GetMetadataResponse{Item: metadataItemFromResult(item)}, nil
 }
 
@@ -245,10 +266,13 @@ func (s *metadataServer) GetImages(ctx context.Context, req *pluginv1.GetImagesR
 	if releaseID == 0 {
 		releaseID = parseInt64(req.GetProviderId())
 	}
-	if releaseID == 0 {
-		return &pluginv1.GetImagesResponse{}, nil
+	var item *provider.Metadata
+	var err error
+	if sceneID, ok := stashProviderID(req.GetProviderId(), req.GetProviderIds()); ok {
+		item, err = s.runtime.provider.GetStashMetadata(ctx, sceneID)
+	} else if releaseID != 0 {
+		item, err = s.runtime.provider.GetMetadata(ctx, releaseID)
 	}
-	item, err := s.runtime.provider.GetMetadata(ctx, releaseID)
 	if err != nil || item == nil {
 		return &pluginv1.GetImagesResponse{}, err
 	}
@@ -330,7 +354,7 @@ func javbeaconCanonicalPath(rawPath string) string {
 
 func searchResultFromMetadata(item *provider.Metadata) *pluginv1.ProviderSearchResult {
 	return &pluginv1.ProviderSearchResult{
-		ProviderId:  strconv.FormatInt(item.ReleaseID, 10),
+		ProviderId:  metadataProviderID(item),
 		ItemType:    "movie",
 		Title:       item.Code,
 		Overview:    item.Overview,
@@ -361,7 +385,7 @@ func metadataItemFromResult(item *provider.Metadata) *pluginv1.MetadataItem {
 		genres = append(genres, "Watchlist")
 	}
 	out := &pluginv1.MetadataItem{
-		ProviderId:    strconv.FormatInt(item.ReleaseID, 10),
+		ProviderId:    metadataProviderID(item),
 		ItemType:      "movie",
 		Title:         item.Code,
 		OriginalTitle: item.OriginalTitle,
@@ -410,7 +434,7 @@ func peopleFromResult(item *provider.Metadata, performerImages map[string]string
 }
 
 func providerIDsStruct(item *provider.Metadata) *structpb.Struct {
-	ids := map[string]any{capabilityID: strconv.FormatInt(item.ReleaseID, 10)}
+	ids := map[string]any{capabilityID: metadataProviderID(item)}
 	if item.StashSceneID != "" {
 		ids[stashSceneIDProviderKeyLower] = item.StashSceneID
 	}
@@ -419,6 +443,23 @@ func providerIDsStruct(item *provider.Metadata) *structpb.Struct {
 		return nil
 	}
 	return out
+}
+
+func metadataProviderID(item *provider.Metadata) string {
+	if item.ProviderID != "" {
+		return item.ProviderID
+	}
+	return strconv.FormatInt(item.ReleaseID, 10)
+}
+
+func stashProviderID(raw string, ids *structpb.Struct) (string, bool) {
+	if ids != nil {
+		if value, ok := ids.AsMap()[capabilityID].(string); ok && strings.HasPrefix(value, "stash:") {
+			raw = value
+		}
+	}
+	sceneID, ok := strings.CutPrefix(raw, "stash:")
+	return sceneID, ok && sceneID != ""
 }
 
 // releaseIDFromProto reads this plugin's own provider id (keyed by

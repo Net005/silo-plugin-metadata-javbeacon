@@ -246,3 +246,17 @@ func TestImagesFromMetadataOmitsStashScreenshotWhenEmpty(t *testing.T) {
 		t.Fatalf("images = %+v, want exactly the cover poster", images)
 	}
 }
+
+func TestStashProviderIDRoundTrip(t *testing.T) {
+	sceneID, ok := stashProviderID("stash:11631", nil)
+	if !ok || sceneID != "11631" {
+		t.Fatalf("sceneID=%q ok=%v", sceneID, ok)
+	}
+	item := &provider.Metadata{ProviderID: "stash:11631", StashSceneID: "11631", Code: "ad-359"}
+	if got := searchResultFromMetadata(item).GetProviderId(); got != "stash:11631" {
+		t.Fatalf("search provider id=%q", got)
+	}
+	if got := metadataItemFromResult(item).GetProviderId(); got != "stash:11631" {
+		t.Fatalf("metadata provider id=%q", got)
+	}
+}

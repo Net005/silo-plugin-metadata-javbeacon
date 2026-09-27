@@ -21,6 +21,7 @@ import "time"
 // reconstruct a JAVBeacon URL convention on its own.
 type Metadata struct {
 	ReleaseID         int64    `json:"release_id"`
+	ProviderID        string   `json:"provider_id,omitempty"`
 	StashSceneID      string   `json:"stash_scene_id,omitempty"`
 	Code              string   `json:"code"`
 	Title             string   `json:"title"`

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.6] - 2026-09-27
+
+### Added
+
+- Match StashApp scenes by exact filename when JAVBeacon has no release,
+  including scenes without a code. Fetch Stash-only metadata and images by a
+  stable scene ID and keep ambiguous filenames unmatched.
+
 ## [0.4.5] - 2026-09-27
 
 ### Fixed

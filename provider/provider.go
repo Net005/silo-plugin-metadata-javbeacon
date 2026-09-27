@@ -110,6 +110,15 @@ func (p *Provider) GetMetadata(ctx context.Context, releaseID int64) (*Metadata,
 	return c.GetMetadata(ctx, releaseID)
 }
 
+// GetStashMetadata resolves a Stash-only provider id.
+func (p *Provider) GetStashMetadata(ctx context.Context, sceneID string) (*Metadata, error) {
+	c, err := p.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetStashMetadata(ctx, sceneID)
+}
+
 // LibrarySync proxies to JAVBeacon's /api/v1/integrations/silo/library-sync.
 func (p *Provider) LibrarySync(ctx context.Context) (*LibrarySync, error) {
 	c, err := p.activeClient()

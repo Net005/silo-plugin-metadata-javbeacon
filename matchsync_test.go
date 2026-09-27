@@ -90,15 +90,14 @@ func TestSelectExactReleaseIDTrimsWhitespace(t *testing.T) {
 	}
 }
 
-func TestLooksLikeReleaseCode(t *testing.T) {
-	for _, title := range []string{"ADN-131", "abgd-01"} {
-		if !looksLikeReleaseCode(title) {
-			t.Fatalf("missed code %q", title)
-		}
+func TestSelectExactStashProviderID(t *testing.T) {
+	rows := []provider.Metadata{{ProviderID: "stash:11631", Code: "ad-359"}, {ProviderID: "stash:2", Code: "OTHER-1"}}
+	id, ok := selectExactStashProviderID(rows, "AD-359")
+	if !ok || id != "stash:11631" {
+		t.Fatalf("id=%q ok=%v", id, ok)
 	}
-	for _, title := range []string{"", "A movie title", "072 squadron - g rangers -cg", "no-digits"} {
-		if looksLikeReleaseCode(title) {
-			t.Fatalf("accepted non-code %q", title)
-		}
+	rows = append(rows, provider.Metadata{ProviderID: "stash:3", Code: "AD-359"})
+	if _, ok := selectExactStashProviderID(rows, "AD-359"); ok {
+		t.Fatal("ambiguous Stash scenes must not be forced")
 	}
 }
