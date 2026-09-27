@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.13] - 2026-09-27
+
+### Fixed
+
+- Fetch Silo collection order ETags and send `If-Match` when reordering members, as required by the live v2 API.
+
 ## [0.4.12] - 2026-09-27
 
 ### Fixed

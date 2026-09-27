@@ -44,7 +44,15 @@ func TestSyncCollectionsCreatesAndReconcilesOrderedMembers(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "page": map[string]any{"has_more": false}})
 		case strings.HasPrefix(r.URL.Path, "/api/v2/admin/collections/c1/items/"):
 			id := strings.TrimPrefix(r.URL.Path, "/api/v2/admin/collections/c1/items/")
+			if id == "order" && r.Method == http.MethodGet {
+				w.Header().Set("ETag", `"order-v1"`)
+				_ = json.NewEncoder(w).Encode(map[string]any{"ordered_ids": []string{}})
+				return
+			}
 			if id == "order" {
+				if r.Header.Get("If-Match") != `"order-v1"` {
+					t.Errorf("missing If-Match on order PUT")
+				}
 				var body struct {
 					Ordered []string `json:"ordered_ids"`
 				}

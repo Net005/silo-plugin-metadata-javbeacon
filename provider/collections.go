@@ -39,39 +39,47 @@ func collectionSlug(spec CollectionSpec) string {
 }
 
 func (c *SiloClient) collectionRequest(ctx context.Context, method, path string, payload any, target any) error {
+	_, err := c.collectionRequestETag(ctx, method, path, payload, target, "")
+	return err
+}
+
+func (c *SiloClient) collectionRequestETag(ctx context.Context, method, path string, payload any, target any, etag string) (string, error) {
 	if !c.Configured() {
-		return fmt.Errorf("silo: api key is not configured")
+		return "", fmt.Errorf("silo: api key is not configured")
 	}
 	var body io.Reader
 	if payload != nil {
 		raw, err := json.Marshal(payload)
 		if err != nil {
-			return err
+			return "", err
 		}
 		body = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if etag != "" {
+		req.Header.Set("If-Match", etag)
+	}
 	req.Header.Set("Accept", "application/json")
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("silo: collection %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		return "", fmt.Errorf("silo: collection %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	if target != nil {
-		return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(target)
+		return resp.Header.Get("ETag"), json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(target)
 	}
-	return nil
+	return resp.Header.Get("ETag"), nil
 }
 
 func (c *SiloClient) collections(ctx context.Context) ([]siloCollection, error) {
@@ -213,7 +221,15 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 		}
 		if needsOrder {
 			path := "/api/v2/admin/collections/" + url.PathEscape(collection.ID) + "/items/order"
-			if err := c.collectionRequest(ctx, http.MethodPut, path, map[string]any{"ordered_ids": ordered}, nil); err != nil {
+			var current json.RawMessage
+			etag, err := c.collectionRequestETag(ctx, http.MethodGet, path, nil, &current, "")
+			if err != nil {
+				return changed, err
+			}
+			if etag == "" {
+				return changed, fmt.Errorf("silo: collection order ETag is missing")
+			}
+			if _, err := c.collectionRequestETag(ctx, http.MethodPut, path, map[string]any{"ordered_ids": ordered}, nil, etag); err != nil {
 				return changed, err
 			}
 		}
