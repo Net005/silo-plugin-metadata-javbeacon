@@ -251,6 +251,13 @@ func (s *metadataServer) personWorker() {
 		// Silo writes the cast after GetMetadata returns. Retry while that
 		// write is settling, then allow a future fetch to enqueue again.
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		birthdate, bio := job.detail.Birthdate, ""
+		if profile, profileErr := s.runtime.provider.GetPerformerBio(ctx, job.detail.StashID); profileErr == nil {
+			if profile.Birthdate != "" {
+				birthdate = profile.Birthdate
+			}
+			bio = profile.ProfileBio()
+		}
 		var err error
 		for attempt, delay := range []time.Duration{3 * time.Second, 5 * time.Second, 15 * time.Second} {
 			select {
@@ -270,7 +277,7 @@ func (s *metadataServer) personWorker() {
 				break
 			}
 			homepage := s.runtime.provider.PublicURL("/api/v1/integrations/performers/" + url.PathEscape(job.detail.StashID) + "/stash")
-			err = provider.NewSiloClient(info.InternalBaseURL, s.runtime.provider.SiloAPIKey()).EnrichPerson(ctx, job.name, job.detail.Birthdate, homepage)
+			err = provider.NewSiloClient(info.InternalBaseURL, s.runtime.provider.SiloAPIKey()).EnrichPerson(ctx, job.name, birthdate, homepage, bio)
 			if err == nil || attempt == 2 {
 				break
 			}
@@ -330,7 +337,7 @@ func (s *metadataServer) GetPersonDetail(ctx context.Context, req *pluginv1.GetP
 	ids, _ := structpb.NewStruct(map[string]any{stashSceneIDProviderKeyLower: id, capabilityID: "stash:" + id, "plex": "stash:" + id})
 	return &pluginv1.GetPersonDetailResponse{Person: &pluginv1.PersonDetailRecord{
 		Name:        bio.Name,
-		Bio:         bio.Details,
+		Bio:         bio.ProfileBio(),
 		BirthDate:   bio.Birthdate,
 		DeathDate:   bio.DeathDate,
 		Homepage:    s.runtime.provider.PublicURL("/api/v1/integrations/performers/" + url.PathEscape(id) + "/stash"),

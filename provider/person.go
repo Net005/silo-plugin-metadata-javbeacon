@@ -14,7 +14,7 @@ import (
 // EnrichPerson uses Silo's admin person API because metadata_provider.v1's
 // PersonRecord cannot carry a birth date or homepage. It only patches an
 // unambiguous exact name match, and never clears a missing Stash birth date.
-func (c *SiloClient) EnrichPerson(ctx context.Context, name, birthdate, homepage string) error {
+func (c *SiloClient) EnrichPerson(ctx context.Context, name, birthdate, homepage, bio string) error {
 	if !c.Configured() {
 		return fmt.Errorf("silo: api key is not configured")
 	}
@@ -80,6 +80,9 @@ func (c *SiloClient) EnrichPerson(ctx context.Context, name, birthdate, homepage
 		return fmt.Errorf("silo: person %q not yet in catalog", name)
 	}
 	patch := map[string]string{"homepage": homepage}
+	if bio != "" {
+		patch["bio"] = bio
+	}
 	if birthdate != "" {
 		patch["birth_date"] = birthdate
 	}
@@ -122,4 +125,29 @@ func (c *SiloClient) personRequest(ctx context.Context, method, path, profileID 
 		}
 	}
 	return nil
+}
+
+// ProfileBio uses Stash's biography when present, otherwise a concise set of
+// factual profile fields. Unknown fields stay absent.
+func (b *PerformerBio) ProfileBio() string {
+	if b == nil {
+		return ""
+	}
+	if details := strings.TrimSpace(b.Details); details != "" {
+		return details
+	}
+	var facts []string
+	if country := strings.TrimSpace(b.Country); country != "" {
+		if strings.EqualFold(country, "JP") {
+			country = "Japan"
+		}
+		facts = append(facts, "Country: "+country)
+	}
+	if career := strings.TrimSpace(b.CareerLength); career != "" {
+		facts = append(facts, "Career: "+career)
+	}
+	if b.HeightCM > 0 {
+		facts = append(facts, fmt.Sprintf("Height: %d cm", b.HeightCM))
+	}
+	return strings.Join(facts, "\n")
 }

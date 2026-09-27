@@ -75,11 +75,14 @@ type PerformerDetail struct {
 
 // PerformerBio is JAVBeacon's authenticated Stash performer detail response.
 type PerformerBio struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Birthdate string `json:"birthdate,omitempty"`
-	DeathDate string `json:"death_date,omitempty"`
-	Details   string `json:"details,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Birthdate    string `json:"birthdate,omitempty"`
+	DeathDate    string `json:"death_date,omitempty"`
+	Details      string `json:"details,omitempty"`
+	Country      string `json:"country,omitempty"`
+	CareerLength string `json:"career_length,omitempty"`
+	HeightCM     int    `json:"height_cm,omitempty"`
 }
 
 // PlaybackEvent mirrors JAVBeacon's internal/jellyfin.PlaybackEvent JSON shape

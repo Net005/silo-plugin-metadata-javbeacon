@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.32] - 2026-09-27
+
+### Improved
+
+- Fill Silo performer biographies with factual Stash profile fields when Stash has no written biography. The background updater fetches each performer profile once per job, patches only known birth dates, and recognizes reversed names by their Stash portrait ID.
+
 ## [0.4.31] - 2026-09-27
 
 ### Fixed

@@ -21,13 +21,14 @@ func TestEnrichPersonOnlySetsKnownBirthdate(t *testing.T) {
 		w.Write([]byte(`{"items":[{"id":"person-1","name":"Mao Hamasaki"},{"id":"person-2","name":"Mao"}]}`))
 	})
 	mux.HandleFunc("PATCH /api/v2/admin/people/person-1", func(w http.ResponseWriter, r *http.Request) {
+		patch = nil
 		json.NewDecoder(r.Body).Decode(&patch)
 		w.WriteHeader(http.StatusOK)
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := NewSiloClient(server.URL, "test-key")
-	if err := client.EnrichPerson(context.Background(), "Mao Hamasaki", "", "https://jav.example/redirect"); err != nil {
+	if err := client.EnrichPerson(context.Background(), "Mao Hamasaki", "", "https://jav.example/redirect", ""); err != nil {
 		t.Fatal(err)
 	}
 	if patch["homepage"] != "https://jav.example/redirect" {
@@ -36,11 +37,20 @@ func TestEnrichPersonOnlySetsKnownBirthdate(t *testing.T) {
 	if _, exists := patch["birth_date"]; exists {
 		t.Fatal("unknown birth date must not clear Silo's value")
 	}
-	if err := client.EnrichPerson(context.Background(), "Mao Hamasaki", "1980-01-01", "https://jav.example/redirect"); err != nil {
+	if err := client.EnrichPerson(context.Background(), "Mao Hamasaki", "1980-01-01", "https://jav.example/redirect", ""); err != nil {
 		t.Fatal(err)
 	}
 	if patch["birth_date"] != "1980-01-01" {
 		t.Fatalf("birth date = %q", patch["birth_date"])
+	}
+	if err := client.EnrichPerson(context.Background(), "Mao Hamasaki", "", "https://jav.example/redirect", "Country: Japan"); err != nil {
+		t.Fatal(err)
+	}
+	if patch["bio"] != "Country: Japan" {
+		t.Fatalf("bio = %q", patch["bio"])
+	}
+	if _, exists := patch["birth_date"]; exists {
+		t.Fatal("missing birth date must not be patched")
 	}
 }
 
@@ -61,10 +71,20 @@ func TestEnrichPersonReversedNameUsesStashPortrait(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := NewSiloClient(server.URL, "test-key")
-	if err := client.EnrichPerson(context.Background(), "Yuuki Takeuchi", "1995-02-12", "https://jav.example/api/v1/integrations/performers/4731/stash"); err != nil {
+	if err := client.EnrichPerson(context.Background(), "Yuuki Takeuchi", "1995-02-12", "https://jav.example/api/v1/integrations/performers/4731/stash", "Country: Japan"); err != nil {
 		t.Fatal(err)
 	}
 	if patched != "/api/v2/admin/people/right" {
 		t.Fatalf("patched %q", patched)
+	}
+}
+
+func TestPerformerBioUsesKnownProfileFacts(t *testing.T) {
+	bio := (&PerformerBio{Country: "JP", CareerLength: "2019 -", HeightCM: 158}).ProfileBio()
+	if bio != "Country: Japan\nCareer: 2019 -\nHeight: 158 cm" {
+		t.Fatalf("bio=%q", bio)
+	}
+	if got := (&PerformerBio{Details: "Existing biography", Country: "JP"}).ProfileBio(); got != "Existing biography" {
+		t.Fatalf("details=%q", got)
 	}
 }
