@@ -46,6 +46,7 @@ type Metadata struct {
 	// this plugin previously had no Stash-screenshot gap-fill at all, unlike
 	// the Jellyfin plugin.
 	StashScreenshotURL string `json:"stash_screenshot_url,omitempty"`
+	StashPosterURL     string `json:"stash_poster_url,omitempty"`
 	SourceURL          string `json:"source_url,omitempty"`
 	// CollectionNames lists every JAVBeacon saved filter set this release
 	// currently belongs to, only populated on the single-release fetch

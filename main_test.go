@@ -319,3 +319,16 @@ func TestPersonRefreshQueuesLatestFollowupDuringCooldown(t *testing.T) {
 		t.Fatal("trailing person update was not queued")
 	}
 }
+
+func TestStashPosterAndOriginalBackdropAreDistinct(t *testing.T) {
+	item := &provider.Metadata{
+		CoverPath:          "/api/v1/integrations/silo/stash/scenes/41614/cover?variant=poster",
+		CoverBackdropPath:  "/api/v1/integrations/silo/stash/scenes/41614/cover",
+		StashPosterURL:     "/api/v1/integrations/silo/stash/scenes/41614/cover?variant=poster",
+		StashScreenshotURL: "/api/v1/integrations/silo/stash/scenes/41614/cover",
+	}
+	images := imagesFromMetadata(item)
+	if len(images) != 2 || images[0].Kind != "poster" || images[1].Kind != "backdrop" || images[0].Url == images[1].Url {
+		t.Fatalf("images=%+v", images)
+	}
+}

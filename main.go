@@ -392,10 +392,13 @@ func imagesFromMetadata(item *provider.Metadata) []*pluginv1.ImageRecord {
 	// it already plays for the Jellyfin plugin. New in JAVBeacon v1.0.239;
 	// this plugin previously had no Stash-screenshot gap-fill at all.
 	if item.StashScreenshotURL != "" {
-		images = append(images,
-			&pluginv1.ImageRecord{Kind: "poster", Url: javbeaconCanonicalPath(item.StashScreenshotURL)},
-			&pluginv1.ImageRecord{Kind: "backdrop", Url: javbeaconCanonicalPath(item.StashScreenshotURL)},
-		)
+		poster := firstNonempty(item.StashPosterURL, item.StashScreenshotURL)
+		if poster != item.CoverPath {
+			images = append(images, &pluginv1.ImageRecord{Kind: "poster", Url: javbeaconCanonicalPath(poster)})
+		}
+		if item.StashScreenshotURL != item.CoverBackdropPath {
+			images = append(images, &pluginv1.ImageRecord{Kind: "backdrop", Url: javbeaconCanonicalPath(item.StashScreenshotURL)})
+		}
 	}
 	return images
 }
@@ -612,4 +615,13 @@ func loadManifest() (*pluginv1.PluginManifest, error) {
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
 	return manifest, nil
+}
+
+func firstNonempty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.30] - 2026-09-27
+
+### Fixed
+
+- Use JAVBeacon’s cropped Stash fallback poster separately from the original scene image used for Silo backdrops. Avoid duplicate image candidates when the poster and backdrop are already primary artwork.
+
 ## [0.4.29] - 2026-09-27
 
 ### Fixed
