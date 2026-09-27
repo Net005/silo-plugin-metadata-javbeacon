@@ -37,7 +37,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 	log := s.logger()
 	siloKey := s.runtime.provider.SiloAPIKey()
 	if siloKey == "" {
-		return map[string]any{"status": "skipped", "reason": "no Silo API key configured (see this plugin's Collection Tag Sync setting)"}, nil
+		return map[string]any{"status": "skipped", "reason": "no Silo API key configured (see this plugin's Silo Collection Sync setting)"}, nil
 	}
 	host := sdkruntime.Host()
 	if host == nil {
@@ -58,26 +58,39 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 	siloClient := provider.NewSiloClient(hostInfo.InternalBaseURL, siloKey)
 
 	matched, skipped, failed := 0, 0, 0
-	var lastErr error
-	cursor := ""
+	s.mu.Lock()
+	cursor, offset := s.matchCursor, s.matchOffset
+	s.mu.Unlock()
 	pages := 0
 	for {
-		pageStart := time.Now()
-		items, next, err := siloClient.ListUnmatchedItems(ctx, cursor)
-		pages++
-		log.Info("match-unmatched: ListUnmatchedItems page finished", "page", pages, "elapsed", time.Since(pageStart), "items", len(items), "err", err)
-		if err != nil {
-			return map[string]any{"status": "error", "error": err.Error()}, err
+		if ctx.Err() != nil {
+			break
 		}
-		for _, item := range items {
+		items, next, err := siloClient.ListUnmatchedItems(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		pages++
+		if offset > len(items) {
+			offset = 0
+		}
+		for i := offset; i < len(items); i++ {
+			if ctx.Err() != nil || shortDeadline(ctx) {
+				s.mu.Lock()
+				s.matchCursor = cursor
+				s.matchOffset = i
+				s.mu.Unlock()
+				return map[string]any{"status": "partial", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": true}, nil
+			}
+			item := items[i]
 			if item.ContentType != "" && item.ContentType != "movie" {
+				skipped++
 				continue
 			}
 			providerID, ok, err := s.exactProviderIDForItem(ctx, siloClient, item)
 			if err != nil {
-				log.Warn("match-unmatched: filename lookup failed", "content_id", item.ContentID, "title", item.Title, "err", err)
 				failed++
-				lastErr = err
+				log.Warn("auto-match lookup failed", "content_id", item.ContentID, "err", err)
 				continue
 			}
 			if !ok {
@@ -85,31 +98,24 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 				continue
 			}
 			if err := siloClient.ApplyMatch(ctx, item.ContentID, item.LibraryID, providerID); err != nil {
-				log.Warn("match-unmatched: ApplyMatch failed", "content_id", item.ContentID, "provider_id", providerID, "err", err)
 				failed++
-				lastErr = err
+				log.Warn("auto-match apply failed", "content_id", item.ContentID, "err", err)
 				continue
 			}
 			matched++
 		}
+		offset = 0
 		if next == "" {
+			cursor = ""
 			break
 		}
 		cursor = next
 	}
-
-	summary := map[string]any{
-		"status":  "ok",
-		"matched": matched,
-		"skipped": skipped,
-		"failed":  failed,
-	}
-	if lastErr != nil {
-		summary["status"] = "partial_failure"
-		summary["last_error"] = lastErr.Error()
-		return summary, lastErr
-	}
-	return summary, nil
+	s.mu.Lock()
+	s.matchCursor = cursor
+	s.matchOffset = offset
+	s.mu.Unlock()
+	return map[string]any{"status": "ok", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": false}, nil
 }
 
 // exactProviderIDForItem checks every media filename before the parsed title.
@@ -273,4 +279,9 @@ func completenessScore(m provider.Metadata) int {
 		score++
 	}
 	return score
+}
+
+func shortDeadline(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && time.Until(deadline) < 1500*time.Millisecond
 }

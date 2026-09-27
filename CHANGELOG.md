@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.14] - 2026-09-27
+
+### Fixed
+
+- Run auto-match inside the scheduled-task RPC in bounded batches and report actual matched, skipped, and failed counts instead of immediately reporting a detached background job as completed.
+
 ## [0.4.13] - 2026-09-27
 
 ### Fixed

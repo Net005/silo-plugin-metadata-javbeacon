@@ -26,9 +26,11 @@ type collectionSyncTaskServer struct {
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log     hclog.Logger
-	mu      sync.Mutex
-	running map[string]bool
+	log         hclog.Logger
+	mu          sync.Mutex
+	running     map[string]bool
+	matchCursor string
+	matchOffset int
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -48,7 +50,7 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 // as task_key on every Run call. Anything other than "match-unmatched" (an
 // empty key, or the id "collection-sync") falls back to the collection-tag
 // sync this struct originally implemented alone.
-func (s *collectionSyncTaskServer) Run(_ context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
+func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := req.GetTaskKey()
 	if taskKey != "match-unmatched" {
 		taskKey = "collection-sync"
@@ -64,6 +66,21 @@ func (s *collectionSyncTaskServer) Run(_ context.Context, req *pluginv1.RunSched
 	}
 	s.running[taskKey] = true
 	s.mu.Unlock()
+	if taskKey == "match-unmatched" {
+		defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
+		workCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		summary, err := s.matchUnmatched(workCtx)
+		if err != nil {
+			s.logger().Error("auto-match task failed", "err", err)
+			return nil, err
+		}
+		output, err := structpb.NewStruct(summary)
+		if err != nil {
+			return nil, err
+		}
+		return &pluginv1.RunScheduledTaskResponse{Output: output}, nil
+	}
 	// Silo gives this RPC a short deadline. A library-wide job must outlive it.
 	go func() {
 		defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
