@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.26] - 2026-09-27
+
+### Fixed
+
+- Accept a Stash scene ID supplied in Silo's `stash` provider ID field during manual search and metadata retrieval. A directly selected Stash scene now resolves even when JAVBeacon's release text search has no match.
+
 ## [0.4.25] - 2026-09-27
 
 ### Fixed

@@ -448,7 +448,10 @@ func metadataProviderID(item *provider.Metadata) string {
 
 func stashProviderID(raw string, ids *structpb.Struct) (string, bool) {
 	if ids != nil {
-		if value, ok := ids.AsMap()[capabilityID].(string); ok && strings.HasPrefix(value, "stash:") {
+		values := ids.AsMap()
+		if value, ok := values[stashSceneIDProviderKeyLower].(string); ok && value != "" {
+			raw = "stash:" + value
+		} else if value, ok := values[capabilityID].(string); ok && strings.HasPrefix(value, "stash:") {
 			raw = value
 		}
 	}

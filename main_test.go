@@ -219,6 +219,16 @@ func TestImagesFromMetadataOmitsStashScreenshotWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestStashProviderIDFromExplicitProviderIDs(t *testing.T) {
+	ids, err := structpb.NewStruct(map[string]any{"stash": "4392"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sceneID, ok := stashProviderID("", ids); !ok || sceneID != "4392" {
+		t.Fatalf("sceneID=%q ok=%v", sceneID, ok)
+	}
+}
+
 func TestStashProviderIDRoundTrip(t *testing.T) {
 	sceneID, ok := stashProviderID("stash:11631", nil)
 	if !ok || sceneID != "11631" {
