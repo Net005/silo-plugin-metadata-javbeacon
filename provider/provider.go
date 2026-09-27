@@ -28,6 +28,7 @@ type Provider struct {
 	mu           sync.RWMutex
 	client       *Client
 	siloAPIKey   string
+	siloBaseURL  string
 	lastSyncedAt string
 }
 
@@ -49,10 +50,19 @@ func (p *Provider) Configure(cfg Config) {
 // separate credential from the JAVBeacon connection above, since it
 // authenticates to Silo itself rather than to JAVBeacon. See the "silo_sync"
 // global config entry in manifest.json.
-func (p *Provider) ConfigureSiloAPIKey(key string) {
+func (p *Provider) ConfigureSiloConnection(baseURL, key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.siloAPIKey = key
+	p.siloBaseURL = baseURL
+}
+
+// SiloBaseURL is the configured admin API endpoint. It avoids a callback to
+// RuntimeHost.GetHostInfo from inside Silo's scheduled-task RPC.
+func (p *Provider) SiloBaseURL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.siloBaseURL
 }
 
 // SiloAPIKey returns the currently configured Silo API key, or "" if none has

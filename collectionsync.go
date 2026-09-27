@@ -132,16 +132,20 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	if key == "" {
 		return map[string]any{"status": "skipped", "reason": "Silo API key is not configured"}, nil
 	}
-	hostInfo, err := host.GetHostInfo(ctx)
-	if err != nil {
-		return nil, err
+	baseURL := s.runtime.provider.SiloBaseURL()
+	if baseURL == "" {
+		hostInfo, err := host.GetHostInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		baseURL = hostInfo.InternalBaseURL
 	}
 	media, err := listJAVMedia(ctx, host)
 	if err != nil {
 		return nil, err
 	}
 	specs := collectionSpecs(snapshot, media)
-	changed, err := provider.NewSiloClient(hostInfo.InternalBaseURL, key).SyncCollections(ctx, specs)
+	changed, err := provider.NewSiloClient(baseURL, key).SyncCollections(ctx, specs)
 	if err != nil {
 		return map[string]any{"status": "error", "error": err.Error()}, err
 	}

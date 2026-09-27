@@ -39,23 +39,19 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 	if siloKey == "" {
 		return map[string]any{"status": "skipped", "reason": "no Silo API key configured (see this plugin's Silo Collection Sync setting)"}, nil
 	}
-	host := sdkruntime.Host()
-	if host == nil {
-		log.Error("match-unmatched: sdkruntime.Host() returned nil - broker not bound yet, or a prior dial failed and was never retried")
-		return map[string]any{"status": "error", "error": "runtime host is not bound"}, fmt.Errorf("match-unmatched: runtime host is not bound")
+	baseURL := s.runtime.provider.SiloBaseURL()
+	if baseURL == "" {
+		host := sdkruntime.Host()
+		if host == nil {
+			return nil, fmt.Errorf("match-unmatched: Silo URL is not configured and runtime host is unavailable")
+		}
+		hostInfo, err := host.GetHostInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		baseURL = hostInfo.InternalBaseURL
 	}
-	// See collectionsync.go's sync() for why this particular call - a
-	// RuntimeHost RPC calling back into the same host that invoked this
-	// Run() - is the leading suspect for the "fails after exactly 10s"
-	// reports, and why it gets timed and logged on its own rather than
-	// folded into the loop below.
-	hostInfoStart := time.Now()
-	hostInfo, err := host.GetHostInfo(ctx)
-	log.Info("match-unmatched: RuntimeHost.GetHostInfo call finished", "elapsed", time.Since(hostInfoStart), "err", err, "ctx_err", ctx.Err())
-	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}, err
-	}
-	siloClient := provider.NewSiloClient(hostInfo.InternalBaseURL, siloKey)
+	siloClient := provider.NewSiloClient(baseURL, siloKey)
 
 	matched, skipped, failed := 0, 0, 0
 	s.mu.Lock()

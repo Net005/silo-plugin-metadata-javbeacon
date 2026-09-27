@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.18] - 2026-09-27
+
+### Fixed
+
+- Allow a configured Silo URL for scheduled tasks, avoiding a RuntimeHost.GetHostInfo callback that times out during live task execution.
+
 ## [0.4.17] - 2026-09-27
 
 ### Fixed

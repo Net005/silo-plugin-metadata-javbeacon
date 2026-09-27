@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.17",
+  "version": "0.4.18",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -120,11 +120,19 @@
     {
       "key": "silo_sync",
       "title": "Silo Collection Sync",
-      "description": "Silo API key for creating and updating ordered Watchlist and saved filter set collections.",
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "description": "Silo API URL and key for ordered collections and auto-matching.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"},\"silo_base_url\":{\"type\":\"string\",\"format\":\"uri\"}},\"additionalProperties\":false}",
       "required": false,
       "admin_form": {
         "fields": [
+          {
+            "key": "silo_base_url",
+            "label": "Silo URL",
+            "description": "This Silo server URL, e.g. https://silo.example.com. Scheduled tasks use it directly to avoid a host callback timeout.",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "https://silo.example.com",
+            "required": false
+          },
           {
             "key": "silo_api_key",
             "label": "Silo API Key",
