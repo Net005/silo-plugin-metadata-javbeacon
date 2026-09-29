@@ -146,9 +146,11 @@ type LibrarySync struct {
 type LibrarySyncItem struct {
 	ReleaseID     int64     `json:"release_id"`
 	StashSceneID  string    `json:"stash_scene_id"`
+	Title         string    `json:"title,omitempty"`
 	Path          string    `json:"path,omitempty"`
 	WatchlistedAt time.Time `json:"watchlisted_at,omitempty"`
 	WatchedAt     time.Time `json:"watched_at,omitempty"`
+	PlayCount     int       `json:"play_count,omitempty"`
 }
 
 // ReleaseIDProviderKey and StashSceneIDProviderKey are the keys JAVBeacon's

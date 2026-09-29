@@ -216,7 +216,7 @@ func (s *watchSyncServer) ListRemoteState(ctx context.Context, req *pluginv1.Wat
 		if kinds[pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHED] {
 			for _, item := range snapshot.Watched {
 				state := stateFor(item.ReleaseID, item.StashSceneID)
-				watched := &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}
+				watched := &pluginv1.WatchSyncRemoteWatchedState{PlayCount: int32(max(item.PlayCount, 1))}
 				if !item.WatchedAt.IsZero() {
 					watched.LastWatchedAt = timestamppb.New(item.WatchedAt)
 				}

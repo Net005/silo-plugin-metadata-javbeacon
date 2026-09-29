@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.34] - 2026-09-29
+
+### Fixed
+
+- Import watched state for Stash-only local movies by matching either their file name or Stash scene title. Skip ambiguous titles to avoid marking the wrong movie watched. Continue reconciling every minute, and preserve Stash play counts in the watch snapshot.
+
 ## [0.4.33] - 2026-09-29
 
 ### Fixed

@@ -229,16 +229,32 @@ func syncItemCode(entry provider.LibrarySyncItem, codes map[int64]string) string
 // JAV releases have none, so apply the authoritative watched flag to local
 // catalog members directly. Existing played flags prevent repeated writes.
 func syncWatchedCatalog(ctx context.Context, client *provider.SiloClient, profileID string, snapshot *provider.LibrarySync, catalog []provider.CatalogItem, codes map[int64]string, limit int) (int, bool, error) {
+	// Resolve only unique catalog titles. Stash-only items may display either
+	// the Stash scene title or their original filename until metadata refresh.
+	byTitle := map[string][]string{}
+	for _, item := range catalog {
+		if item.Type == "movie" && item.ContentID != "" {
+			key := normalizedCatalogCode(item.Title)
+			byTitle[key] = append(byTitle[key], item.ContentID)
+		}
+	}
 	wanted := map[string]bool{}
 	for _, entry := range snapshot.Watched {
-		code := syncItemCode(entry, codes)
-		if code != "" {
-			wanted[normalizedCatalogCode(code)] = true
+		keys := []string{syncItemCode(entry, codes), entry.Title}
+		for _, candidate := range keys {
+			if candidate == "" {
+				continue
+			}
+			matches := byTitle[normalizedCatalogCode(candidate)]
+			if len(matches) == 1 {
+				wanted[matches[0]] = true
+				break
+			}
 		}
 	}
 	changed := 0
 	for _, item := range catalog {
-		if item.Type != "movie" || item.ContentID == "" || item.UserState.Played || !wanted[normalizedCatalogCode(item.Title)] {
+		if item.Type != "movie" || item.ContentID == "" || item.UserState.Played || !wanted[item.ContentID] {
 			continue
 		}
 		if limit > 0 && changed >= limit {

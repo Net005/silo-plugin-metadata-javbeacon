@@ -78,3 +78,30 @@ func TestCatalogWatchlistUsesReleaseCodeWhenPathMissing(t *testing.T) {
 		t.Fatalf("watchlist fallback: %+v", specs)
 	}
 }
+
+func TestWatchedCatalogMatchesStashOnlySceneTitle(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	catalog := []provider.CatalogItem{{ContentID: "stash-only", Title: "Washing Time", Type: "movie"}, {ContentID: "other", Title: "Other", Type: "movie"}}
+	snapshot := &provider.LibrarySync{Watched: []provider.LibrarySyncItem{{StashSceneID: "27456", Path: "/media/Futanari - 2022-10-14 - Washing Time [WEBDL-2160p].mp4", Title: "Washing Time", PlayCount: 2}}}
+	changed, complete, err := syncWatchedCatalog(context.Background(), provider.NewSiloClient(server.URL, "key"), "profile", snapshot, catalog, nil, 400)
+	if err != nil || !complete || changed != 1 || len(paths) != 1 || paths[0] != "/api/v2/watched/stash-only" {
+		t.Fatalf("changed=%d complete=%v paths=%v err=%v", changed, complete, paths, err)
+	}
+}
+
+func TestWatchedCatalogSkipsAmbiguousStashTitle(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.WriteHeader(http.StatusNoContent) }))
+	defer server.Close()
+	catalog := []provider.CatalogItem{{ContentID: "one", Title: "Same Title", Type: "movie"}, {ContentID: "two", Title: "Same Title", Type: "movie"}}
+	snapshot := &provider.LibrarySync{Watched: []provider.LibrarySyncItem{{StashSceneID: "1", Title: "Same Title"}}}
+	changed, _, err := syncWatchedCatalog(context.Background(), provider.NewSiloClient(server.URL, "key"), "profile", snapshot, catalog, nil, 400)
+	if err != nil || changed != 0 || called {
+		t.Fatalf("changed=%d called=%v err=%v", changed, called, err)
+	}
+}
