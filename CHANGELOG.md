@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.33] - 2026-09-29
+
+### Fixed
+
+- Display the Stash scene title for Stash-only Silo movies instead of the filename-derived matching code. Keep the code as the provider identity and fall back to it only when Stash has no scene title.
+
 ## [0.4.32] - 2026-09-27
 
 ### Improved

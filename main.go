@@ -451,11 +451,22 @@ func javbeaconCanonicalPath(rawPath string) string {
 	return "javbeacon://" + strings.TrimPrefix(rawPath, "/")
 }
 
+// metadataDisplayTitle keeps JAVBeacon release codes as titles, while Stash-only
+// scenes use the curated scene title instead of their filename-derived code.
+func metadataDisplayTitle(item *provider.Metadata) string {
+	if item.ReleaseID == 0 && item.StashSceneID != "" {
+		if title := strings.TrimSpace(item.Title); title != "" {
+			return title
+		}
+	}
+	return item.Code
+}
+
 func searchResultFromMetadata(item *provider.Metadata) *pluginv1.ProviderSearchResult {
 	return &pluginv1.ProviderSearchResult{
 		ProviderId:  metadataProviderID(item),
 		ItemType:    "movie",
-		Title:       item.Code,
+		Title:       metadataDisplayTitle(item),
 		Overview:    item.Overview,
 		ProviderIds: providerIDsStruct(item),
 		ImageUrl:    javbeaconCanonicalPath(item.CoverPath),
@@ -475,9 +486,9 @@ func metadataItemFromResult(item *provider.Metadata) *pluginv1.MetadataItem {
 	out := &pluginv1.MetadataItem{
 		ProviderId:    metadataProviderID(item),
 		ItemType:      "movie",
-		Title:         item.Code,
+		Title:         metadataDisplayTitle(item),
 		OriginalTitle: item.OriginalTitle,
-		SortTitle:     item.Code,
+		SortTitle:     metadataDisplayTitle(item),
 		Year:          int32(item.ProductionYear),
 		Overview:      item.Overview,
 		Runtime:       int32(item.RuntimeSeconds / 60),

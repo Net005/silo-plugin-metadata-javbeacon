@@ -234,6 +234,30 @@ func TestStashProviderIDFromExplicitProviderIDs(t *testing.T) {
 	}
 }
 
+func TestStashOnlySceneUsesCuratedTitle(t *testing.T) {
+	item := &provider.Metadata{
+		ProviderID: "stash:27456", StashSceneID: "27456",
+		Code:  "Futanari - 2022-10-14 - Washing Time [WEBDL-2160p]",
+		Title: "Washing Time", OriginalTitle: "Washing Time",
+	}
+	if got := searchResultFromMetadata(item).GetTitle(); got != "Washing Time" {
+		t.Fatalf("search title = %q", got)
+	}
+	result := metadataItemFromResult(item)
+	if result.GetTitle() != "Washing Time" || result.GetSortTitle() != "Washing Time" || result.GetProviderId() != "stash:27456" {
+		t.Fatalf("Stash metadata title/identity = %+v", result)
+	}
+	item.Title = " "
+	if got := metadataItemFromResult(item).GetTitle(); got != item.Code {
+		t.Fatalf("empty Stash title fallback = %q", got)
+	}
+	item.ReleaseID = 123
+	item.Title = "Other title"
+	if got := metadataItemFromResult(item).GetTitle(); got != item.Code {
+		t.Fatalf("JAVBeacon release title = %q", got)
+	}
+}
+
 func TestStashProviderIDRoundTrip(t *testing.T) {
 	sceneID, ok := stashProviderID("stash:11631", nil)
 	if !ok || sceneID != "11631" {
