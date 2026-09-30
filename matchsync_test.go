@@ -27,16 +27,14 @@ func TestSelectExactReleaseIDRejectsNoMatch(t *testing.T) {
 	}
 }
 
-func TestSelectExactReleaseIDRejectsAmbiguousMultipleHits(t *testing.T) {
-	// Same code appearing twice with EQUALLY scraped (here: equally empty)
-	// metadata must never be force-applied - there is no signal to tell
-	// which one is correct.
+func TestSelectExactReleaseIDChoosesStableDuplicate(t *testing.T) {
+	// Same exact code and equally complete metadata use a stable ID tie-break.
 	results := []provider.Metadata{
 		{Code: "ADN-131", ReleaseID: 9001},
 		{Code: "ADN-131", ReleaseID: 9099},
 	}
-	if _, ok := selectExactReleaseID(results, "ADN-131"); ok {
-		t.Fatal("expected no match when the exact code is ambiguous")
+	if id, ok := selectExactReleaseID(results, "ADN-131"); !ok || id != 9001 {
+		t.Fatalf("duplicate id=%d ok=%v", id, ok)
 	}
 }
 
@@ -65,14 +63,14 @@ func TestSelectExactReleaseIDPicksMostCompleteDuplicate(t *testing.T) {
 // itself, not just the two-candidate case: a later candidate matching the
 // current best score must not silently win by virtue of appearing later in
 // the slice.
-func TestSelectExactReleaseIDRejectsThreeWayTie(t *testing.T) {
+func TestSelectExactReleaseIDChoosesStableThreeWayTie(t *testing.T) {
 	results := []provider.Metadata{
 		{Code: "ADN-131", ReleaseID: 9001, Studio: "A"},
 		{Code: "ADN-131", ReleaseID: 9002, Studio: "B"},
 		{Code: "ADN-131", ReleaseID: 9003, Studio: "C"},
 	}
-	if _, ok := selectExactReleaseID(results, "ADN-131"); ok {
-		t.Fatal("expected no match when all duplicates tie for the best score")
+	if id, ok := selectExactReleaseID(results, "ADN-131"); !ok || id != 9001 {
+		t.Fatalf("three-way duplicate id=%d ok=%v", id, ok)
 	}
 }
 
@@ -126,5 +124,26 @@ func TestScheduledMatchSelectsStashOnlySceneByFilename(t *testing.T) {
 	id, ok, err := task.exactProviderIDForItem(t.Context(), provider.NewSiloClient(silo.URL, "test"), provider.UnmatchedItem{ContentID: "local-1", Title: "Wrong parsed title"})
 	if err != nil || !ok || id != "stash:11631" {
 		t.Fatalf("provider id=%q ok=%v err=%v", id, ok, err)
+	}
+}
+
+func TestExactCodeMatchesHyphenatedAndCompactForms(t *testing.T) {
+	rows := []provider.Metadata{{Code: "PMID008", ReleaseID: 12}}
+	for _, q := range []string{"PMID008", "PMID-008", "PMID_008"} {
+		if id, ok := selectExactReleaseID(rows, q); !ok || id != 12 {
+			t.Fatalf("%s: id=%d ok=%v", q, id, ok)
+		}
+	}
+}
+
+func TestFilenameReleaseCodeWithQualitySuffix(t *testing.T) {
+	for input, want := range map[string]string{
+		"PMID-008 [WEBDL-2160p]":     "PMID-008",
+		"gxxd06 - alternate":         "gxxd-06",
+		"Washing Time [WEBDL-2160p]": "",
+	} {
+		if got := filenameReleaseCode(input); got != want {
+			t.Fatalf("%q => %q, want %q", input, got, want)
+		}
 	}
 }

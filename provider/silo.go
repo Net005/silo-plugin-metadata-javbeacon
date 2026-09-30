@@ -52,37 +52,75 @@ func (c *SiloClient) Configured() bool {
 // genre list at all. "complete" is heavier per call, but this task only
 // calls it when jellyfin_library_revision has actually moved, so the extra
 // cost is bounded to real changes, not every poll.
-func (c *SiloClient) RefreshItemMetadata(ctx context.Context, mediaID string) error {
+func (c *SiloClient) RefreshItemMetadata(ctx context.Context, mediaID string) (string, error) {
 	if !c.Configured() {
-		return fmt.Errorf("silo: api key is not configured")
+		return "", fmt.Errorf("silo: api key is not configured")
 	}
 	if mediaID == "" {
-		return fmt.Errorf("silo: media id is required")
+		return "", fmt.Errorf("silo: media id is required")
 	}
 	body, err := json.Marshal(map[string]string{"mode": "complete"})
 	if err != nil {
-		return fmt.Errorf("silo: encode request: %w", err)
+		return "", fmt.Errorf("silo: encode request: %w", err)
 	}
-	path := fmt.Sprintf("/api/v2/admin/items/%s/refresh-metadata", mediaID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+fmt.Sprintf("/api/v2/admin/items/%s/refresh-metadata", mediaID), bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("silo: create request: %w", err)
+		return "", fmt.Errorf("silo: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("silo: request failed: %w", err)
+		return "", fmt.Errorf("silo: request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusAccepted || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return "", fmt.Errorf("silo: HTTP %d refreshing item %s: %s", resp.StatusCode, mediaID, strings.TrimSpace(string(raw)))
 	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return fmt.Errorf("silo: HTTP %d refreshing item %s: %s", resp.StatusCode, mediaID, strings.TrimSpace(string(raw)))
+	var job struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&job); err != nil {
+		return "", fmt.Errorf("silo: decode refresh job: %w", err)
+	}
+	if job.ID == "" {
+		return "", fmt.Errorf("silo: refresh response had no job ID")
+	}
+	return job.ID, nil
+}
+
+// MetadataJobState checks the durable Silo job after asynchronous admission.
+// HTTP 202 only means the work was queued, not that metadata was refreshed.
+func (c *SiloClient) MetadataJobState(ctx context.Context, jobID string) (string, error) {
+	if !c.Configured() || jobID == "" {
+		return "", fmt.Errorf("silo: client and job ID are required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v2/admin/jobs/"+url.PathEscape(jobID), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("silo: job %s HTTP %d", jobID, resp.StatusCode)
+	}
+	var job struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&job); err != nil {
+		return "", err
+	}
+	if job.State == "" {
+		return "", fmt.Errorf("silo: job %s missing state", jobID)
+	}
+	return job.State, nil
 }
 
 // UnmatchedItem is one row of GET /api/v2/libraries/unmatched-items - an item

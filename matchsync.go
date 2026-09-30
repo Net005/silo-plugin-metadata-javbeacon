@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +72,7 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 			offset = 0
 		}
 		for i := offset; i < len(items); i++ {
-			if ctx.Err() != nil || shortDeadline(ctx) || matched >= 100 {
+			if ctx.Err() != nil || shortDeadline(ctx) || matched >= 400 {
 				return s.matchPartial(cursor, i, matched, skipped, failed, pages, "batch_limit")
 			}
 			item := items[i]
@@ -133,9 +134,20 @@ func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, c
 			continue
 		}
 		seen[strings.ToLower(stem)] = true
-		id, ok, err := s.exactProviderIDForTitle(ctx, stem)
-		if err != nil {
-			return "", false, err
+		candidates := []string{stem}
+		if code := filenameReleaseCode(stem); code != "" && normalizedCatalogCode(code) != normalizedCatalogCode(stem) {
+			candidates = append([]string{code}, candidates...)
+		}
+		id, ok := "", false
+		for _, candidate := range candidates {
+			var err error
+			id, ok, err = s.exactProviderIDForTitle(ctx, candidate)
+			if err != nil {
+				return "", false, err
+			}
+			if ok {
+				break
+			}
 		}
 		if !ok {
 			continue
@@ -155,18 +167,21 @@ func (s *collectionSyncTaskServer) exactProviderIDForItem(ctx context.Context, c
 	return "", false, nil
 }
 
-// exactProviderIDForTitle asks JAVBeacon's own search for title and accepts a
-// hit whenever exactly one result's Code matches title exactly
-// (case-insensitively, after trimming whitespace on both sides) - or, when
-// several results share that exact code (a genuine JAVBeacon-side duplicate:
-// confirmed live, e.g. two "THPA-15" releases from two different site/
-// scraper registrations, one fully scraped and one an essentially empty
-// placeholder), whenever exactly one of them strictly has the most scraped
-// metadata (see selectExactReleaseID/completenessScore). A title with no
-// exact code hit at all, or duplicates tied for the most metadata, both come
-// back as "no confident match" rather than guessing - this task force-applies
-// a match with no score threshold to fall back on, so it must never resolve
-// an actual coin flip.
+var filenameReleaseCodePattern = regexp.MustCompile(`(?i)^\s*[\[(]?\s*([a-z]{2,12})[-_ ]*([0-9]{1,6})(?:\b|[_ .-])`)
+
+// filenameReleaseCode extracts a leading code from a file carrying quality
+// suffixes. The full filename remains the Stash-only fallback candidate.
+func filenameReleaseCode(stem string) string {
+	match := filenameReleaseCodePattern.FindStringSubmatch(stem)
+	if len(match) != 3 {
+		return ""
+	}
+	return match[1] + "-" + match[2]
+}
+
+// exactProviderIDForTitle accepts only separator-equivalent exact codes.
+// Duplicate releases favor the most complete metadata, with a stable ID
+// tie-break when equally complete.
 func (s *collectionSyncTaskServer) exactProviderIDForTitle(ctx context.Context, title string) (string, bool, error) {
 	needle := strings.TrimSpace(title)
 	if needle == "" {
@@ -189,7 +204,7 @@ func (s *collectionSyncTaskServer) exactProviderIDForTitle(ctx context.Context, 
 func selectExactStashProviderID(results []provider.Metadata, needle string) (string, bool) {
 	providerID := ""
 	for _, result := range results {
-		if !strings.EqualFold(strings.TrimSpace(result.Code), strings.TrimSpace(needle)) || !strings.HasPrefix(result.ProviderID, "stash:") {
+		if normalizedCatalogCode(result.Code) != normalizedCatalogCode(needle) || !strings.HasPrefix(result.ProviderID, "stash:") {
 			continue
 		}
 		if providerID != "" {
@@ -205,11 +220,8 @@ func selectExactStashProviderID(results []provider.Metadata, needle string) (str
 // With no exact-code hit at all, returns ok=false. With exactly one, returns
 // it. With more than one (a duplicate release code), returns the single
 // candidate that strictly has the most scraped metadata (completenessScore)
-// - or ok=false if two or more of them tie for the best score, since there is
-// then no signal to prefer one over another and a wrong forced match is
-// worse than an item that stays unmatched (see exactReleaseIDForTitle's own
-// doc comment). Pulled out of exactReleaseIDForTitle so it can be unit
-// tested without a configured provider or network access.
+// - with a stable release-ID tie-break when scores are equal. Pulled out so
+// it can be tested without a configured provider or network access.
 func selectExactReleaseID(results []provider.Metadata, title string) (int64, bool) {
 	needle := strings.TrimSpace(title)
 	if needle == "" {
@@ -217,7 +229,7 @@ func selectExactReleaseID(results []provider.Metadata, title string) (int64, boo
 	}
 	var candidates []provider.Metadata
 	for _, item := range results {
-		if strings.EqualFold(strings.TrimSpace(item.Code), needle) {
+		if normalizedCatalogCode(item.Code) == normalizedCatalogCode(needle) {
 			candidates = append(candidates, item)
 		}
 	}
@@ -236,8 +248,17 @@ func selectExactReleaseID(results []provider.Metadata, title string) (int64, boo
 			tied = true
 		}
 	}
-	if tied || candidates[bestIdx].ReleaseID == 0 {
+	if candidates[bestIdx].ReleaseID == 0 {
 		return 0, false
+	}
+	// Two records with the same exact code and equal metadata are equivalent
+	// for matching. Pick a stable winner so repeat scans do not disagree.
+	if tied {
+		for i, candidate := range candidates {
+			if completenessScore(candidate) == bestScore && candidate.ReleaseID > 0 && candidate.ReleaseID < candidates[bestIdx].ReleaseID {
+				bestIdx = i
+			}
+		}
 	}
 	return candidates[bestIdx].ReleaseID, true
 }

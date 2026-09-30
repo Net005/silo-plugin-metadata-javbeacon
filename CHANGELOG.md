@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.37] - 2026-09-30
+
+### Improved
+
+- Keep auto-match running in a resident worker after the scheduled-task response, check for new unmatched files every minute, and process up to 400 matches per pass. Extract leading release codes from filenames with quality suffixes, normalize hyphen/underscore variants, and choose a stable record when duplicate exact codes have equal metadata.
+- Coalesce near-simultaneous library snapshots and stop clearing the metadata cache on every watched-state poll.
+
+### Fixed
+
+- Route each changed Stash/JAV file to its actual Silo movie library, then wait for each asynchronous item-refresh job to succeed before acknowledging JAVBeacon metadata changes. Submit at most 50 jobs per poll and retry failed jobs with backoff instead of silently losing edits after a job fails. Requires JAVBeacon v1.0.272 or later.
+
 ## [0.4.36] - 2026-09-30
 
 ### Fixed

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Config is the shape of the manifest's "connection" global config entry.
@@ -25,12 +26,16 @@ type Config struct {
 // enters them, so this plugin must actually implement Configure rather than
 // treat it as a no-op.
 type Provider struct {
-	mu            sync.RWMutex
-	client        *Client
-	siloAPIKey    string
-	siloBaseURL   string
-	siloLibraryID string
-	lastSyncedAt  string
+	mu             sync.RWMutex
+	client         *Client
+	siloAPIKey     string
+	siloBaseURL    string
+	siloLibraryID  string
+	lastSyncedAt   string
+	snapshotMu     sync.Mutex
+	snapshot       *LibrarySync
+	snapshotClient *Client
+	snapshotAt     time.Time
 }
 
 // NewProvider returns an unconfigured provider. Every RPC returns a clear
@@ -157,15 +162,26 @@ func (p *Provider) GetPerformerBio(ctx context.Context, performerID string) (*Pe
 
 // LibrarySync proxies to JAVBeacon's /api/v1/integrations/silo/library-sync.
 func (p *Provider) LibrarySync(ctx context.Context) (*LibrarySync, error) {
+	p.snapshotMu.Lock()
+	defer p.snapshotMu.Unlock()
 	c, err := p.activeClient()
 	if err != nil {
 		return nil, err
 	}
+	if p.snapshotClient == c && p.snapshot != nil && time.Since(p.snapshotAt) < 10*time.Second {
+		return p.snapshot, nil
+	}
 	snapshot, err := c.LibrarySync(ctx)
-	if err == nil {
+	if err != nil {
+		return nil, err
+	}
+	if p.snapshotClient == c && p.snapshot != nil && p.snapshot.Revision != snapshot.Revision {
 		c.ClearMetadataCache()
 	}
-	return snapshot, err
+	p.snapshotClient = c
+	p.snapshot = snapshot
+	p.snapshotAt = time.Now()
+	return snapshot, nil
 }
 
 // ReportPlayback proxies to JAVBeacon's /api/v1/integrations/silo/playback.

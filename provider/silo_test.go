@@ -18,11 +18,12 @@ func TestRefreshItemMetadataUsesCompleteMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"job-1"}`))
 	}))
 	defer server.Close()
 
 	client := NewSiloClient(server.URL, "test-key")
-	if err := client.RefreshItemMetadata(t.Context(), "9001"); err != nil {
+	if jobID, err := client.RefreshItemMetadata(t.Context(), "9001"); err != nil || jobID != "job-1" {
 		t.Fatalf("RefreshItemMetadata: %v", err)
 	}
 	if gotBody["mode"] != "complete" {
@@ -183,5 +184,19 @@ func TestItemHasFileInLibraryChecksExactPathAndLibrary(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("library=%s path=%s got=%v err=%v", tc.library, tc.path, got, err)
 		}
+	}
+}
+
+func TestMetadataJobStateReadsTerminalFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/admin/jobs/job-1" {
+			t.Errorf("path=%s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"id":"job-1","state":"failed"}`))
+	}))
+	defer server.Close()
+	state, err := NewSiloClient(server.URL, "key").MetadataJobState(t.Context(), "job-1")
+	if err != nil || state != "failed" {
+		t.Fatalf("state=%q err=%v", state, err)
 	}
 }

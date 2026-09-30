@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.36",
+  "version": "0.4.37",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -80,13 +80,13 @@
       "type": "scheduled_task.v1",
       "id": "collection-sync",
       "display_name": "Sync JAVBeacon collections",
-      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background, also applies watched flags to local Silo items, and can be scheduled as a safety pass."
+      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background and can be scheduled as a safety pass. Watched flags synchronize independently across local movie libraries."
     },
     {
       "type": "scheduled_task.v1",
       "id": "match-unmatched",
       "display_name": "Auto-match unmatched JAVBeacon items",
-      "description": "Silo's own auto-matcher scores search results against the local file's title and year, and JAV releases frequently have no year in their filename - so even an exact release-code title match can score below Silo's auto-accept threshold and sit as unmatched or ambiguous. This task walks Silo's unmatched-items list, re-checks each one against JAVBeacon's own search for an exact release-code hit, and force-applies that match via Silo's admin API (POST /api/v2/admin/items/{id}/match/apply) when the hit is unambiguous - including picking the more fully scraped one automatically when JAVBeacon has two releases sharing that exact code, unless they're equally complete, in which case it still skips the item rather than guess. Requires the Silo API key set below. Run it on a schedule, or trigger it manually after a scan."
+      "description": "Silo's own auto-matcher scores search results against the local file's title and year, and JAV releases frequently have no year in their filename - so even an exact release-code title match can score below Silo's auto-accept threshold and sit as unmatched or ambiguous. This task walks Silo's unmatched-items list, re-checks each one against JAVBeacon's own search for an exact release-code hit, and force-applies that match via Silo's admin API (POST /api/v2/admin/items/{id}/match/apply) when the hit is unambiguous - including picking the more fully scraped one automatically when JAVBeacon has two releases sharing that exact code, breaking exact-code ties by stable release ID. Requires the Silo API key set below. Run it on a schedule, or trigger it manually after a scan."
     }
   ],
   "global_config_schema": [

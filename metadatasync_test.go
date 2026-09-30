@@ -65,13 +65,21 @@ func TestChangedMetadataRefreshAcknowledgesOnlyAfterSiloAccepts(t *testing.T) {
 	defer jav.Close()
 	refreshStatus := http.StatusAccepted
 	refreshed := 0
+	jobState := "queued"
 	silo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v2/libraries":
+			_, _ = w.Write([]byte(`{"items":[{"id":"16","type":"movies","paths":["/collections/giga"]}]}`))
 		case "/api/v2/admin/items/" + id + "/files":
 			_, _ = w.Write([]byte(`{"items":[{"library_id":"16","file_path":"/collections/giga/abgd-01.wmv"}],"page":{"has_more":false}}`))
 		case "/api/v2/admin/items/" + id + "/refresh-metadata":
 			refreshed++
 			w.WriteHeader(refreshStatus)
+			if refreshStatus == http.StatusAccepted {
+				_, _ = w.Write([]byte(`{"id":"job-1"}`))
+			}
+		case "/api/v2/admin/jobs/job-1":
+			_, _ = w.Write([]byte(`{"state":"` + jobState + `"}`))
 		default:
 			t.Errorf("unexpected Silo request %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -88,7 +96,86 @@ func TestChangedMetadataRefreshAcknowledgesOnlyAfterSiloAccepts(t *testing.T) {
 	}
 	refreshStatus = http.StatusAccepted
 	next, count, err := task.syncChangedMetadata(context.Background(), time.Time{})
-	if err != nil || count != 1 || !next.Equal(checked) || refreshed != 2 || acked != 1 {
-		t.Fatalf("next=%v count=%d refreshed=%d acked=%d err=%v", next, count, refreshed, acked, err)
+	if err != nil || !next.IsZero() || count != 1 || refreshed != 2 || acked != 0 {
+		t.Fatalf("queued next=%v count=%d refreshed=%d acked=%d err=%v", next, count, refreshed, acked, err)
+	}
+	next, count, err = task.syncChangedMetadata(context.Background(), time.Time{})
+	if err != nil || !next.IsZero() || count != 0 || acked != 0 {
+		t.Fatalf("running next=%v count=%d acked=%d err=%v", next, count, acked, err)
+	}
+	jobState = "failed"
+	next, _, err = task.syncChangedMetadata(context.Background(), time.Time{})
+	if err != nil || !next.IsZero() || acked != 0 {
+		t.Fatalf("failed job was acknowledged: next=%v acked=%d err=%v", next, acked, err)
+	}
+	task.metadataPending.items[0].retryAt = time.Time{}
+	jobState = "queued"
+	_, count, err = task.syncChangedMetadata(context.Background(), time.Time{})
+	if err != nil || count != 1 || refreshed != 3 {
+		t.Fatalf("retry count=%d refreshed=%d err=%v", count, refreshed, err)
+	}
+	jobState = "succeeded"
+	next, _, err = task.syncChangedMetadata(context.Background(), time.Time{})
+	if err != nil || !next.Equal(checked) || acked != 1 {
+		t.Fatalf("completed next=%v acked=%d err=%v", next, acked, err)
+	}
+
+}
+
+func TestLibraryForMetadataPathSelectsLongestLocalRoot(t *testing.T) {
+	libraries := []provider.MovieLibrary{{ID: "16", Paths: []string{"/collections"}}, {ID: "18", Paths: []string{"/collections/hentaied/Hentaied"}}, {ID: "19", Paths: []string{"/collections/misc/other"}}}
+	if id := libraryForMetadataPath("/collections/hentaied/Hentaied/scene.mp4", libraries); id != "18" {
+		t.Fatalf("library=%s", id)
+	}
+	if id := libraryForMetadataPath("/collections/misc/other/scene.mp4", libraries); id != "19" {
+		t.Fatalf("library=%s", id)
+	}
+	if id := libraryForMetadataPath("/outside/scene.mp4", libraries); id != "" {
+		t.Fatalf("outside library=%s", id)
+	}
+}
+
+func TestChangedStashSceneRefreshesItsOwnSiloLibrary(t *testing.T) {
+	path := "/collections/hentaied/Hentaied/scene.mp4"
+	id := siloLocalContentID(path)
+	checked := time.Now().UTC().Add(-time.Second).Truncate(time.Second)
+	acked := false
+	jav := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/integrations/silo/metadata-changes" {
+			_ = json.NewEncoder(w).Encode(provider.MetadataChanges{CheckedAt: checked, Items: []provider.MetadataChange{{StashSceneID: "1056", Path: path}}})
+		} else if r.URL.Path == "/api/v1/integrations/silo/metadata-changes/ack" {
+			acked = true
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			t.Errorf("JAV path=%s", r.URL.Path)
+		}
+	}))
+	defer jav.Close()
+	silo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/libraries":
+			_, _ = w.Write([]byte(`{"items":[{"id":"16","type":"movies","paths":["/collections/giga"]},{"id":"18","type":"movies","paths":["/collections/hentaied/Hentaied"]}]}`))
+		case "/api/v2/admin/items/" + id + "/files":
+			_, _ = w.Write([]byte(`{"items":[{"library_id":"18","file_path":"` + path + `"}],"page":{"has_more":false}}`))
+		case "/api/v2/admin/items/" + id + "/refresh-metadata":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"job-18"}`))
+		case "/api/v2/admin/jobs/job-18":
+			_, _ = w.Write([]byte(`{"state":"succeeded"}`))
+		default:
+			t.Errorf("Silo path=%s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer silo.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: jav.URL, APIKey: "key"})
+	p.ConfigureSiloConnection(silo.URL, "16", "key")
+	task := &collectionSyncTaskServer{runtime: &runtimeServer{provider: p}}
+	if _, n, err := task.syncChangedMetadata(context.Background(), time.Time{}); err != nil || n != 1 || acked {
+		t.Fatalf("queued n=%d acked=%v err=%v", n, acked, err)
+	}
+	if next, _, err := task.syncChangedMetadata(context.Background(), time.Time{}); err != nil || !next.Equal(checked) || !acked {
+		t.Fatalf("next=%v acked=%v err=%v", next, acked, err)
 	}
 }

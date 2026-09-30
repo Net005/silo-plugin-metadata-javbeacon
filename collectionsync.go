@@ -28,11 +28,12 @@ type collectionSyncTaskServer struct {
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log         hclog.Logger
-	mu          sync.Mutex
-	running     map[string]bool
-	matchCursor string
-	matchOffset int
+	log             hclog.Logger
+	mu              sync.Mutex
+	running         map[string]bool
+	matchCursor     string
+	matchOffset     int
+	metadataPending *metadataRefreshBatch
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -114,25 +115,60 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 			return taskOutput(map[string]any{"status": "running"})
 		}
 	}
+	done, started := s.startMatchSync()
+	if !started {
+		return taskOutput(map[string]any{"status": "running"})
+	}
+	timer := time.NewTimer(8 * time.Second)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		if result.err != nil {
+			return nil, result.err
+		}
+		return taskOutput(result.summary)
+	case <-timer.C:
+		return taskOutput(map[string]any{"status": "running", "detail": "Auto-match continues in the background"})
+	case <-ctx.Done():
+		return taskOutput(map[string]any{"status": "running"})
+	}
+
+}
+
+func (s *collectionSyncTaskServer) startMatchSync() (<-chan collectionSyncResult, bool) {
 	s.mu.Lock()
 	if s.running == nil {
 		s.running = make(map[string]bool)
 	}
-	if s.running[taskKey] {
+	if s.running["match-unmatched"] {
 		s.mu.Unlock()
-		return taskOutput(map[string]any{"status": "already_running"})
+		return nil, false
 	}
-	s.running[taskKey] = true
+	s.running["match-unmatched"] = true
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.running, taskKey); s.mu.Unlock() }()
-	workCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	summary, err := s.matchUnmatched(workCtx)
-	if err != nil {
-		s.logger().Error("scheduled task failed", "task_key", taskKey, "err", err)
-		return nil, err
+	done := make(chan collectionSyncResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		summary, err := s.matchUnmatched(ctx)
+		if err != nil {
+			s.logger().Error("auto-match failed", "error", err)
+		}
+		done <- collectionSyncResult{summary, err}
+		s.mu.Lock()
+		delete(s.running, "match-unmatched")
+		s.mu.Unlock()
+	}()
+	return done, true
+}
+
+func (s *collectionSyncTaskServer) pollMatch() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		s.startMatchSync()
+		<-ticker.C
 	}
-	return taskOutput(summary)
 }
 
 func taskOutput(summary map[string]any) (*pluginv1.RunScheduledTaskResponse, error) {

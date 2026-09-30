@@ -198,3 +198,7 @@ go test ./...
 
 No license file is included yet - add one (e.g. matching JAVBeacon's own) before
 publishing this repository.
+
+### Incremental metadata refresh
+
+JAVBeacon v1.0.272 or later exposes changes to local releases and Stash scenes. The plugin polls every 15 seconds, routes each changed file to its Silo movie library, and queues at most 50 targeted Silo item refreshes per pass. It checks each job result before acknowledging the change cursor; failed jobs are retried with backoff. A full Silo library refresh still uses Silo's own scan queue and can take much longer.
