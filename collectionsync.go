@@ -168,11 +168,9 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	client := provider.NewSiloClient(baseURL, key)
 	var specs []provider.CollectionSpec
 	var catalog []provider.CatalogItem
-	var profileID string
 	var codes map[int64]string
-	watchedChanged, watchedComplete := 0, true
 	if libraryID != "" {
-		catalog, profileID, err = client.ListLibraryCatalogForProfile(ctx, libraryID)
+		catalog, _, err = client.ListLibraryCatalogForProfile(ctx, libraryID)
 		if err != nil {
 			return nil, err
 		}
@@ -198,21 +196,15 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
-			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": watchedChanged}, nil
+			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": 0}, nil
 		}
 		return map[string]any{"status": "error", "error": err.Error()}, err
 	}
-	if libraryID != "" {
-		watchedChanged, watchedComplete, err = syncWatchedCatalog(ctx, client, profileID, snapshot, catalog, codes, 400)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if !complete || !watchedComplete {
-		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed, "watched_changes": watchedChanged}, nil
+	if !complete {
+		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed, "watched_changes": 0}, nil
 	}
 	s.runtime.provider.SetLastSyncedRevision(snapshot.Revision)
-	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed, "watched_changes": watchedChanged}, nil
+	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed, "watched_changes": 0}, nil
 }
 
 func syncItemCode(entry provider.LibrarySyncItem, codes map[int64]string) string {
@@ -239,7 +231,20 @@ func syncWatchedCatalog(ctx context.Context, client *provider.SiloClient, profil
 		}
 	}
 	wanted := map[string]bool{}
+	catalogIDs := map[string]bool{}
+	for _, item := range catalog {
+		if item.Type == "movie" && item.ContentID != "" {
+			catalogIDs[item.ContentID] = true
+		}
+	}
 	for _, entry := range snapshot.Watched {
+		if entry.Path != "" {
+			id := siloLocalContentID(entry.Path)
+			if catalogIDs[id] {
+				wanted[id] = true
+				continue
+			}
+		}
 		keys := []string{syncItemCode(entry, codes), entry.Title}
 		for _, candidate := range keys {
 			if candidate == "" {

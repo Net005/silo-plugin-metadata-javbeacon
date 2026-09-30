@@ -105,3 +105,23 @@ func TestWatchedCatalogSkipsAmbiguousStashTitle(t *testing.T) {
 		t.Fatalf("changed=%d called=%v err=%v", changed, called, err)
 	}
 }
+
+func TestWatchedCatalogUsesExactStashPathWhenTitleDiffers(t *testing.T) {
+	path := "/collections/hentaied/Hentaied/Hentaied - 2021-10-30 - Agatha Vega [WEBDL-2160p].mp4"
+	id := siloLocalContentID(path)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v2/watched/"+id {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		calls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	catalog := []provider.CatalogItem{{ContentID: id, Title: "Completely different Silo title", Type: "movie"}}
+	snapshot := &provider.LibrarySync{Watched: []provider.LibrarySyncItem{{StashSceneID: "1056", Path: path, Title: "Agatha Vega", PlayCount: 1}}}
+	changed, complete, err := syncWatchedCatalog(context.Background(), provider.NewSiloClient(server.URL, "key"), "profile", snapshot, catalog, nil, 400)
+	if err != nil || !complete || changed != 1 || calls != 1 {
+		t.Fatalf("changed=%d complete=%v calls=%d err=%v", changed, complete, calls, err)
+	}
+}

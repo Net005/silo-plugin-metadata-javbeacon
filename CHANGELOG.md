@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.36] - 2026-09-30
+
+### Fixed
+
+- Import Stash watched state across every matching Silo movie library, including Hentaied and Other, instead of only the configured JAV library. Match exact local file IDs before titles. Run watched reconciliation independently every 30 seconds so collection rate limits do not block it; process up to 200 newly watched items per pass.
+
 ## [0.4.35] - 2026-09-30
 
 ### Improved

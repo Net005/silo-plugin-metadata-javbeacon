@@ -115,3 +115,28 @@ func (c *SiloClient) MarkWatched(ctx context.Context, profileID, contentID strin
 	}
 	return nil
 }
+
+// MovieLibrary describes a Silo library whose local files may carry Stash
+// playback history. Watch sync is not confined to the metadata plugin's
+// configured JAV library.
+type MovieLibrary struct {
+	ID    string   `json:"id"`
+	Type  string   `json:"type"`
+	Paths []string `json:"paths"`
+}
+
+func (c *SiloClient) ListMovieLibraries(ctx context.Context) ([]MovieLibrary, error) {
+	var data struct {
+		Items []MovieLibrary `json:"items"`
+	}
+	if err := c.collectionRequest(ctx, http.MethodGet, "/api/v2/libraries", nil, &data); err != nil {
+		return nil, err
+	}
+	out := make([]MovieLibrary, 0, len(data.Items))
+	for _, item := range data.Items {
+		if item.Type == "movies" && item.ID != "" {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
