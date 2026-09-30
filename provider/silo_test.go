@@ -165,3 +165,23 @@ func TestApplyMatchSendsStashSceneProviderIDs(t *testing.T) {
 		t.Fatalf("provider_ids=%v", ids)
 	}
 }
+
+func TestItemHasFileInLibraryChecksExactPathAndLibrary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Error("missing API key")
+		}
+		_, _ = w.Write([]byte(`{"items":[{"library_id":"16","file_path":"/media/one.mp4"}],"page":{"has_more":false}}`))
+	}))
+	defer server.Close()
+	client := NewSiloClient(server.URL, "secret")
+	for _, tc := range []struct {
+		library, path string
+		want          bool
+	}{{"16", "/media/one.mp4", true}, {"17", "/media/one.mp4", false}, {"16", "/media/two.mp4", false}} {
+		got, err := client.ItemHasFileInLibrary(context.Background(), "local-one", tc.library, tc.path)
+		if err != nil || got != tc.want {
+			t.Fatalf("library=%s path=%s got=%v err=%v", tc.library, tc.path, got, err)
+		}
+	}
+}

@@ -76,7 +76,7 @@ func (s *runtimeServer) Configure(_ context.Context, req *pluginv1.ConfigureRequ
 		}
 	}
 	if s.collectionSync != nil {
-		s.pollOnce.Do(func() { go s.collectionSync.poll() })
+		s.pollOnce.Do(func() { go s.collectionSync.poll(); go s.collectionSync.pollMetadata() })
 	}
 	return &pluginv1.ConfigureResponse{}, nil
 }

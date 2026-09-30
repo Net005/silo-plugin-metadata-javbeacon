@@ -255,3 +255,63 @@ func (c *SiloClient) ItemFilePaths(ctx context.Context, contentID string) ([]str
 	}
 	return nil, fmt.Errorf("silo: item has too many file pages")
 }
+
+// ItemHasFileInLibrary verifies a path-derived local content ID against
+// Silo's own file record. A hash alone must not refresh an item in a different
+// library or assume a file still exists after a scan.
+func (c *SiloClient) ItemHasFileInLibrary(ctx context.Context, contentID, libraryID, filePath string) (bool, error) {
+	cursor := ""
+	for page := 0; page < 20; page++ {
+		path := "/api/v2/admin/items/" + url.PathEscape(contentID) + "/files?limit=200"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+		if err != nil {
+			return false, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return false, err
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return false, nil
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return false, fmt.Errorf("silo: HTTP %d checking item files: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		var data struct {
+			Items []struct {
+				LibraryID string `json:"library_id"`
+				FilePath  string `json:"file_path"`
+			} `json:"items"`
+			Page struct {
+				HasMore    bool   `json:"has_more"`
+				NextCursor string `json:"next_cursor"`
+			} `json:"page"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		resp.Body.Close()
+		if err != nil {
+			return false, err
+		}
+		for _, item := range data.Items {
+			if item.LibraryID == libraryID && item.FilePath == filePath {
+				return true, nil
+			}
+		}
+		if !data.Page.HasMore {
+			return false, nil
+		}
+		if data.Page.NextCursor == "" || data.Page.NextCursor == cursor {
+			return false, fmt.Errorf("silo: item files pagination did not advance")
+		}
+		cursor = data.Page.NextCursor
+	}
+	return false, fmt.Errorf("silo: too many item file pages")
+}

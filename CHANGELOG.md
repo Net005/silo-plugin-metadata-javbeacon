@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.35] - 2026-09-30
+
+### Improved
+
+- Poll JAVBeacon’s local metadata change feed every 15 seconds independently of collection sync. Resolve changed Stash and JAVBeacon files to exact Silo library items, clear stale provider cache, and queue targeted complete refreshes instead of rescanning the entire library. Verify fallback catalog matches against the actual file path and retain the change cursor when Silo rejects a job. Requires JAVBeacon v1.0.272 or later.
+
 ## [0.4.34] - 2026-09-29
 
 ### Fixed
