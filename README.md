@@ -29,6 +29,19 @@ Silo's plugin SDK (v0.15.0) actually allows:
   use this path when no local JAVBeacon release exists.
 - **Watched state in Silo** - an independent 30-second worker compares StashApp's watched snapshot with local Silo movie libraries, matches the exact file path when available, and marks only unplayed matches watched for the primary profile. It continues after collection sync errors or rate limits. Silo's generic watch-provider importer cannot match JAVBeacon/Stash IDs (it only accepts TMDB/IMDb/TVDB), so import is no longer advertised there. Existing playback events continue to flow from Silo to JAVBeacon/StashApp through the watch provider. Historical play counts and timestamps cannot be imported through Silo's watched API.
 - **Silo collections** - the StashApp Watchlist and each JAVBeacon saved filter set become real, ordered Silo collections in each matched library. Watchlist follows the StashApp scene update order (newest first); saved filter sets follow JAVBeacon's resolved order. Only items present in the local Silo library are included. Collection artwork rotates every six hours from those members, usually favoring recent releases while sometimes showing older ones. A one-minute background poll applies changes, and the `collection-sync` scheduled task provides a manual and scheduled reconciliation path. The plugin owns only collections bearing its stable slug and description marker.
+### Choose saved filters for Silo collections
+
+In **Silo Collection Sync**, enter a comma-separated list of exact saved filter
+names or numeric IDs in **Saved filters to import** (for example,
+`Prison, Office Lady, 12`). Leave it blank to import all saved filters. Names
+are matched without case sensitivity; IDs are stable if you rename a filter.
+Use **Saved filter collection prefix** to name the resulting Silo collections,
+for example `Stash | ` gives `Stash | Prison`. Save the config, then run
+**Sync JAVBeacon collections** or wait for the next automatic sync. Watchlist
+always syncs and does not receive the prefix. Deselecting a filter removes
+only its plugin-owned Silo collection; collections you created manually are
+left alone.
+
 - **Stash metadata/image gap-fill** - as of JAVBeacon v1.0.239, served by
   JAVBeacon's own dedicated `internal/silo.Service` (previously this reused
   `internal/jellyfin.Service` directly; see "Independent from the Jellyfin

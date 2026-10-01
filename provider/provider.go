@@ -31,6 +31,8 @@ type Provider struct {
 	siloAPIKey     string
 	siloBaseURL    string
 	siloLibraryID  string
+	savedFilters   string
+	filterPrefix   string
 	lastSyncedAt   string
 	snapshotMu     sync.Mutex
 	snapshot       *LibrarySync
@@ -62,6 +64,21 @@ func (p *Provider) ConfigureSiloConnection(baseURL, libraryID, key string) {
 	p.siloAPIKey = key
 	p.siloBaseURL = baseURL
 	p.siloLibraryID = libraryID
+}
+
+// ConfigureSavedFilters limits collection import to exact preset names or IDs.
+// An empty selection retains the historical behavior of importing all presets.
+func (p *Provider) ConfigureSavedFilters(selection, prefix string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.savedFilters = selection
+	p.filterPrefix = prefix
+}
+
+func (p *Provider) SavedFilterSettings() (string, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.savedFilters, p.filterPrefix
 }
 
 // SiloBaseURL is the configured admin API endpoint. It avoids a callback to

@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.37",
+  "version": "0.4.38",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -80,7 +80,7 @@
       "type": "scheduled_task.v1",
       "id": "collection-sync",
       "display_name": "Sync JAVBeacon collections",
-      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and every JAVBeacon saved filter set. Runs in the background and can be scheduled as a safety pass. Watched flags synchronize independently across local movie libraries."
+      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and the selected JAVBeacon saved filter sets. Runs in the background and can be scheduled as a safety pass."
     },
     {
       "type": "scheduled_task.v1",
@@ -120,8 +120,8 @@
     {
       "key": "silo_sync",
       "title": "Silo Collection Sync",
-      "description": "Silo API URL and key for ordered collections and auto-matching.",
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"},\"silo_base_url\":{\"type\":\"string\",\"format\":\"uri\"},\"silo_library_id\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "description": "Choose which saved filter sets become Silo collections and configure their names.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"},\"silo_base_url\":{\"type\":\"string\",\"format\":\"uri\"},\"silo_library_id\":{\"type\":\"string\"},\"saved_filter_selection\":{\"type\":\"string\"},\"saved_filter_prefix\":{\"type\":\"string\"}},\"additionalProperties\":false}",
       "required": false,
       "admin_form": {
         "fields": [
@@ -148,6 +148,22 @@
             "control": "ADMIN_FORM_CONTROL_PASSWORD",
             "required": false,
             "secret": true
+          },
+          {
+            "key": "saved_filter_selection",
+            "label": "Saved filters to import",
+            "description": "Comma-separated exact saved filter names or numeric IDs from JAVBeacon. Leave blank to import every saved filter. Watchlist is always synced. Removing a selection deletes only collections previously created by this plugin for that filter.",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "Prison, 12, Office Lady",
+            "required": false
+          },
+          {
+            "key": "saved_filter_prefix",
+            "label": "Saved filter collection prefix",
+            "description": "Text added before each imported saved filter collection name in Silo. Watchlist keeps its name. For example: Stash | ",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "Stash | ",
+            "required": false
           }
         ]
       }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.38] - 2026-10-01
+
+### Added
+
+- Select Stash saved filter sets for Silo collection import by exact name or numeric ID in plugin settings, and add a custom prefix to imported collection titles. A blank selection preserves import-all behavior; Watchlist remains independently synchronized. Deselecting removes only the plugin-owned collection for that filter.
+
 ## [0.4.37] - 2026-09-30
 
 ### Improved

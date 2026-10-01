@@ -202,6 +202,11 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		return nil, fmt.Errorf("collection-sync: Silo URL is required")
 	}
 	client := provider.NewSiloClient(baseURL, key)
+	selection, prefix := s.runtime.provider.SavedFilterSettings()
+	snapshot, err = selectedFilterSnapshot(snapshot, selection, prefix)
+	if err != nil {
+		return nil, err
+	}
 	var specs []provider.CollectionSpec
 	var catalog []provider.CatalogItem
 	var codes map[int64]string
@@ -229,7 +234,7 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		}
 		specs = collectionSpecs(snapshot, media)
 	}
-	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400)
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400, strings.TrimSpace(selection) != "")
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
 			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": 0}, nil
@@ -331,6 +336,39 @@ func listJAVMedia(ctx context.Context, host *runtimehost.Client) ([]runtimehost.
 		token = resp.NextPageToken
 	}
 	return items, nil
+}
+
+// selectedFilterSnapshot applies exact saved-filter names or numeric IDs. A
+// blank selection keeps all presets; an unmatched nonblank selection imports
+// none, avoiding an accidental broad import after a typo.
+func selectedFilterSnapshot(snapshot *provider.LibrarySync, selection, prefix string) (*provider.LibrarySync, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	copy := *snapshot
+	selected := map[string]bool{}
+	found := map[string]bool{}
+	for _, token := range strings.FieldsFunc(selection, func(r rune) bool { return r == ',' || r == '\n' }) {
+		if token = strings.ToLower(strings.TrimSpace(token)); token != "" {
+			selected[token] = true
+		}
+	}
+	copy.FilterPresets = make([]provider.FilterPresetCollection, 0, len(snapshot.FilterPresets))
+	for _, preset := range snapshot.FilterPresets {
+		if len(selected) > 0 && !selected[strconv.FormatInt(preset.ID, 10)] && !selected[strings.ToLower(strings.TrimSpace(preset.Name))] {
+			continue
+		}
+		found[strconv.FormatInt(preset.ID, 10)] = true
+		found[strings.ToLower(strings.TrimSpace(preset.Name))] = true
+		preset.Name = prefix + preset.Name
+		copy.FilterPresets = append(copy.FilterPresets, preset)
+	}
+	for token := range selected {
+		if !found[token] {
+			return nil, fmt.Errorf("saved filter %q was not found; check its exact name or numeric ID", token)
+		}
+	}
+	return &copy, nil
 }
 
 func collectionSpecs(snapshot *provider.LibrarySync, media []runtimehost.CatalogMediaItem) []provider.CollectionSpec {

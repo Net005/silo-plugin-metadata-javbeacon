@@ -73,6 +73,7 @@ func (s *runtimeServer) Configure(_ context.Context, req *pluginv1.ConfigureRequ
 			})
 		case "silo_sync":
 			s.provider.ConfigureSiloConnection(stringValue(values["silo_base_url"]), stringValue(values["silo_library_id"]), stringValue(values["silo_api_key"]))
+			s.provider.ConfigureSavedFilters(stringValue(values["saved_filter_selection"]), stringValue(values["saved_filter_prefix"]))
 		}
 	}
 	if s.collectionSync != nil {

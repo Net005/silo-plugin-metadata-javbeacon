@@ -42,7 +42,7 @@ func TestSyncCollectionsCreatesAndReconcilesOrderedMembers(t *testing.T) {
 				Description string `json:"description"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&data)
-			collection = siloCollection{ID: "c1", Slug: data.Slug, LibraryID: data.LibraryID, Description: data.Description}
+			collection = siloCollection{ID: "c1", Title: data.Title, Slug: data.Slug, LibraryID: data.LibraryID, Description: data.Description}
 			_ = json.NewEncoder(w).Encode(collection)
 		case r.URL.Path == "/api/v2/admin/collections/c1/items" && r.Method == http.MethodGet:
 			items := []map[string]any{}
@@ -144,5 +144,64 @@ func TestAlphabetizeManagedSlotsPreservesOtherCollections(t *testing.T) {
 	got, changed = alphabetizeManagedSlots(got, byID)
 	if changed || !reflect.DeepEqual(got, want) {
 		t.Fatalf("already sorted: got %v, changed %v", got, changed)
+	}
+}
+
+func TestSyncCollectionsSelectionRenamesAndPrunesOwnedPresets(t *testing.T) {
+	kept := siloCollection{ID: "keep", Title: "Prison", Slug: "javbeacon-preset-1-library-lib", LibraryID: "lib", Description: collectionOwner}
+	removed := siloCollection{ID: "remove", Title: "Other", Slug: "javbeacon-preset-2-library-lib", LibraryID: "lib", Description: collectionOwner}
+	user := siloCollection{ID: "user", Title: "Other", Slug: "my-other", LibraryID: "lib", Description: "User collection"}
+	outside := siloCollection{ID: "outside", Title: "Other", Slug: "javbeacon-preset-2-library-other", LibraryID: "other", Description: collectionOwner}
+	items := []siloCollection{kept, removed, user, outside}
+	deleted := map[string]bool{}
+	renamed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v2/admin/collections" && r.Method == http.MethodGet:
+			live := []siloCollection{}
+			for _, item := range items {
+				if !deleted[item.ID] {
+					live = append(live, item)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": live})
+		case r.URL.Path == "/api/v2/admin/collections/order" && r.Method == http.MethodGet:
+			w.Header().Set("ETag", `"order"`)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ordered_ids": []string{"keep", "remove", "user", "outside"}})
+		case r.URL.Path == "/api/v2/admin/collections/order" && r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/api/v2/admin/collections/remove" && r.Method == http.MethodDelete:
+			deleted["remove"] = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/api/v2/admin/collections/keep" && r.Method == http.MethodGet:
+			w.Header().Set("ETag", `"item"`)
+			_ = json.NewEncoder(w).Encode(kept)
+		case r.URL.Path == "/api/v2/admin/collections/keep" && r.Method == http.MethodPatch:
+			if r.Header.Get("If-Match") != `"item"` {
+				t.Error("missing title ETag")
+			}
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			renamed = body["title"] == "Stash | Prison"
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/api/v2/admin/collections/keep/items" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "page": map[string]any{"has_more": false}})
+		case r.URL.Path == "/api/v2/admin/collections/keep" && r.Method == http.MethodDelete:
+			t.Error("deleted selected collection")
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := NewSiloClient(server.URL, "key")
+	specs := []CollectionSpec{{Kind: "preset", PresetID: 1, Name: "Stash | Prison", LibraryID: "lib"}}
+	_, _, err := client.SyncCollectionsBatch(context.Background(), specs, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted["remove"] || deleted["user"] || deleted["outside"] || !renamed {
+		t.Fatalf("deleted=%v renamed=%v", deleted, renamed)
 	}
 }

@@ -152,7 +152,7 @@ func (c *SiloClient) SyncCollections(ctx context.Context, specs []CollectionSpec
 
 // SyncCollectionsBatch limits writes per invocation so Silo scheduled tasks
 // can resume safely instead of exceeding the task RPC deadline or API quota.
-func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []CollectionSpec, maxChanges int) (int, bool, error) {
+func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []CollectionSpec, maxChanges int, pruneUnselected ...bool) (int, bool, error) {
 	existing, err := c.collections(ctx)
 	if err != nil {
 		return 0, false, err
@@ -162,18 +162,21 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 		bySlug[item.Slug] = item
 	}
 	desired := map[string]CollectionSpec{}
+	activeLibraries := map[string]bool{}
 	for _, spec := range specs {
+		activeLibraries[spec.LibraryID] = true
 		if (spec.Kind != "watchlist" && (spec.Kind != "preset" || spec.PresetID <= 0)) || spec.LibraryID == "" {
 			continue
 		}
 		desired[collectionSlug(spec)] = spec
 	}
+	prune := len(pruneUnselected) > 0 && pruneUnselected[0]
 	// Reconcile formerly managed collections too when a saved preset is
 	// removed or no matching media remain. Keep the empty collection rather
 	// than deleting an administrator-visible object without a restore path.
 	for _, item := range existing {
 		if (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) && strings.HasPrefix(item.Description, collectionOwner) {
-			if _, ok := desired[item.Slug]; !ok {
+			if _, ok := desired[item.Slug]; !ok && !(prune && strings.HasPrefix(item.Slug, "javbeacon-preset-")) {
 				desired[item.Slug] = CollectionSpec{LibraryID: item.LibraryID}
 			}
 		}
@@ -196,6 +199,28 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 		slugs = append(slugs, slug)
 	}
 	sort.Strings(slugs)
+	// A nonblank selection removes only plugin-owned preset collections that
+	// are no longer selected. User-owned and Watchlist collections are kept.
+	if prune {
+		for _, item := range existing {
+			if !strings.HasPrefix(item.Slug, "javbeacon-preset-") || !strings.HasPrefix(item.Description, collectionOwner) || !activeLibraries[item.LibraryID] {
+				continue
+			}
+			if _, ok := desired[item.Slug]; ok {
+				continue
+			}
+			if collectionDeadlineNear(ctx) {
+				return changed, false, nil
+			}
+			if err := c.collectionRequest(ctx, http.MethodDelete, "/api/v2/admin/collections/"+url.PathEscape(item.ID), nil, nil); err != nil {
+				return changed, false, err
+			}
+			changed++
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
+		}
+	}
 	createdAny := false
 	for _, slug := range slugs {
 		if collectionDeadlineNear(ctx) {
@@ -216,6 +241,24 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			}
 			changed++
 			createdAny = true
+			if maxChanges > 0 && changed >= maxChanges {
+				return changed, false, nil
+			}
+		}
+		if exists && spec.Name != "" && collection.Title != spec.Name {
+			path := "/api/v2/admin/collections/" + url.PathEscape(collection.ID)
+			var current json.RawMessage
+			etag, err := c.collectionRequestETag(ctx, http.MethodGet, path, nil, &current, "")
+			if err != nil {
+				return changed, false, err
+			}
+			if etag == "" {
+				return changed, false, fmt.Errorf("silo: collection title ETag is missing")
+			}
+			if _, err := c.collectionRequestETag(ctx, http.MethodPatch, path, map[string]string{"title": spec.Name}, nil, etag); err != nil {
+				return changed, false, err
+			}
+			changed++
 			if maxChanges > 0 && changed >= maxChanges {
 				return changed, false, nil
 			}
