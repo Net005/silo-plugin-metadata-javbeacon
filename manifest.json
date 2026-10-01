@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.38",
+  "version": "0.4.39",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -80,7 +80,7 @@
       "type": "scheduled_task.v1",
       "id": "collection-sync",
       "display_name": "Sync JAVBeacon collections",
-      "description": "Reconcile ordered Silo collections for the StashApp Watchlist and the selected JAVBeacon saved filter sets. Runs in the background and can be scheduled as a safety pass."
+      "description": "Reconcile ordered Silo collections for the StashApp Watchlist, selected Stash scene saved filters, and selected JAVBeacon Release Library saved filters."
     },
     {
       "type": "scheduled_task.v1",
@@ -121,7 +121,7 @@
       "key": "silo_sync",
       "title": "Silo Collection Sync",
       "description": "Choose which saved filter sets become Silo collections and configure their names.",
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"},\"silo_base_url\":{\"type\":\"string\",\"format\":\"uri\"},\"silo_library_id\":{\"type\":\"string\"},\"saved_filter_selection\":{\"type\":\"string\"},\"saved_filter_prefix\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"silo_api_key\":{\"type\":\"string\"},\"silo_base_url\":{\"type\":\"string\",\"format\":\"uri\"},\"silo_library_id\":{\"type\":\"string\"},\"saved_filter_selection\":{\"type\":\"string\"},\"saved_filter_prefix\":{\"type\":\"string\"},\"stash_saved_filter_selection\":{\"type\":\"string\"},\"stash_saved_filter_prefix\":{\"type\":\"string\"}},\"additionalProperties\":false}",
       "required": false,
       "admin_form": {
         "fields": [
@@ -151,16 +151,32 @@
           },
           {
             "key": "saved_filter_selection",
-            "label": "Saved filters to import",
-            "description": "Comma-separated exact saved filter names or numeric IDs from JAVBeacon. Leave blank to import every saved filter. Watchlist is always synced. Removing a selection deletes only collections previously created by this plugin for that filter.",
+            "label": "JAVBeacon saved filters to import",
+            "description": "Comma-separated exact names or numeric IDs of JAVBeacon Release Library saved filters. Blank imports all JAVBeacon saved filters. This setting does not select Stash filters.",
             "control": "ADMIN_FORM_CONTROL_TEXT",
             "placeholder": "Prison, 12, Office Lady",
             "required": false
           },
           {
             "key": "saved_filter_prefix",
-            "label": "Saved filter collection prefix",
-            "description": "Text added before each imported saved filter collection name in Silo. Watchlist keeps its name. For example: Stash | ",
+            "label": "JAVBeacon collection prefix",
+            "description": "Prefix added only to collections imported from JAVBeacon Release Library saved filters.",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "JAV | ",
+            "required": false
+          },
+          {
+            "key": "stash_saved_filter_selection",
+            "label": "Stash scene saved filters to import",
+            "description": "Comma-separated exact names or numeric IDs of StashApp SCENES saved filters. Blank disables Stash saved-filter import. Watchlist still syncs.",
+            "control": "ADMIN_FORM_CONTROL_TEXT",
+            "placeholder": "Favorites, 7",
+            "required": false
+          },
+          {
+            "key": "stash_saved_filter_prefix",
+            "label": "Stash collection prefix",
+            "description": "Prefix added only to collections imported from StashApp scene saved filters. Watchlist keeps its name.",
             "control": "ADMIN_FORM_CONTROL_TEXT",
             "placeholder": "Stash | ",
             "required": false

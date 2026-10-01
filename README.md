@@ -31,16 +31,12 @@ Silo's plugin SDK (v0.15.0) actually allows:
 - **Silo collections** - the StashApp Watchlist and each JAVBeacon saved filter set become real, ordered Silo collections in each matched library. Watchlist follows the StashApp scene update order (newest first); saved filter sets follow JAVBeacon's resolved order. Only items present in the local Silo library are included. Collection artwork rotates every six hours from those members, usually favoring recent releases while sometimes showing older ones. A one-minute background poll applies changes, and the `collection-sync` scheduled task provides a manual and scheduled reconciliation path. The plugin owns only collections bearing its stable slug and description marker.
 ### Choose saved filters for Silo collections
 
-In **Silo Collection Sync**, enter a comma-separated list of exact saved filter
-names or numeric IDs in **Saved filters to import** (for example,
-`Prison, Office Lady, 12`). Leave it blank to import all saved filters. Names
-are matched without case sensitivity; IDs are stable if you rename a filter.
-Use **Saved filter collection prefix** to name the resulting Silo collections,
-for example `Stash | ` gives `Stash | Prison`. Save the config, then run
-**Sync JAVBeacon collections** or wait for the next automatic sync. Watchlist
-always syncs and does not receive the prefix. Deselecting a filter removes
-only its plugin-owned Silo collection; collections you created manually are
-left alone.
+Under **Silo Collection Sync**, the two sources have independent settings:
+
+- **JAVBeacon saved filters to import** selects Release Library saved filters by exact name or numeric ID, separated by commas. Blank imports all, preserving the previous behavior. **JAVBeacon collection prefix** changes only these collection names.
+- **Stash scene saved filters to import** selects StashApp `SCENES` saved filters by exact name or numeric ID. Blank disables this opt-in import. **Stash collection prefix** changes only these collection names. This requires JAVBeacon v1.0.274 or later.
+
+For example, enter `Prison, 12` and prefix `JAV | ` for JAVBeacon, then `Favorites, 7` and prefix `Stash | ` for StashApp. Save the config, then run **Sync JAVBeacon collections** or wait for the next automatic sync. Names are case-insensitive; IDs remain stable across renames. Only local files in the configured Silo library become members. Watchlist always syncs and keeps its name. A mistyped name or ID stops reconciliation without removing existing collections. Deselecting a valid filter removes only its plugin-owned Silo collection; manually created collections are untouched.
 
 - **Stash metadata/image gap-fill** - as of JAVBeacon v1.0.239, served by
   JAVBeacon's own dedicated `internal/silo.Service` (previously this reused
@@ -123,6 +119,7 @@ instance it points at:
 - `POST /api/v1/integrations/silo/playback`
 - `GET /api/v1/integrations/silo/library-sync` (used only by the
   `collection-sync` scheduled task)
+- `GET /api/v1/integrations/silo/stash-saved-filters` (used only when Stash scene saved-filter import is selected; requires JAVBeacon v1.0.274)
 - `GET /api/v1/integrations/silo/releases/{id}/stash-cover` (new in
   JAVBeacon v1.0.239; requires a JAVBeacon build at that version or later,
   older builds 404 on this one route only)

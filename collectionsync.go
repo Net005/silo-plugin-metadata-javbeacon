@@ -202,10 +202,17 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		return nil, fmt.Errorf("collection-sync: Silo URL is required")
 	}
 	client := provider.NewSiloClient(baseURL, key)
-	selection, prefix := s.runtime.provider.SavedFilterSettings()
-	snapshot, err = selectedFilterSnapshot(snapshot, selection, prefix)
+	stashSelection, stashPrefix, javSelection, javPrefix := s.runtime.provider.SavedFilterSettings()
+	snapshot, err = selectedFilterSnapshot(snapshot, javSelection, javPrefix)
 	if err != nil {
 		return nil, err
+	}
+	stashFilters := []provider.StashSavedFilter{}
+	if strings.TrimSpace(stashSelection) != "" {
+		stashFilters, err = s.runtime.provider.StashSavedFilters(ctx, stashSelection)
+		if err != nil {
+			return nil, fmt.Errorf("Stash saved filters: %w", err)
+		}
 	}
 	var specs []provider.CollectionSpec
 	var catalog []provider.CatalogItem
@@ -223,6 +230,7 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 			}
 		}
 		specs = collectionSpecsFromCatalog(snapshot, catalog, codes, libraryID)
+		specs = append(specs, stashFilterSpecsFromCatalog(stashFilters, catalog, libraryID, stashPrefix)...)
 	} else {
 		host := sdkruntime.Host()
 		if host == nil {
@@ -233,8 +241,9 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 			return nil, err
 		}
 		specs = collectionSpecs(snapshot, media)
+		specs = append(specs, stashFilterSpecsFromMedia(stashFilters, media, stashPrefix)...)
 	}
-	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400, strings.TrimSpace(selection) != "")
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400, strings.TrimSpace(javSelection) != "", true)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
 			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": 0}, nil
@@ -336,6 +345,63 @@ func listJAVMedia(ctx context.Context, host *runtimehost.Client) ([]runtimehost.
 		token = resp.NextPageToken
 	}
 	return items, nil
+}
+
+// stashFilterSpecsFromCatalog uses the exact Stash file path to resolve a
+// local Silo content ID. A scene outside this library is never imported.
+func stashFilterSpecsFromCatalog(filters []provider.StashSavedFilter, catalog []provider.CatalogItem, libraryID, prefix string) []provider.CollectionSpec {
+	byID := map[string]provider.CatalogItem{}
+	for _, item := range catalog {
+		if item.Type == "movie" {
+			byID[item.ContentID] = item
+		}
+	}
+	specs := make([]provider.CollectionSpec, 0, len(filters))
+	for _, filter := range filters {
+		spec := provider.CollectionSpec{Kind: "stash_preset", PresetKey: filter.ID, Name: prefix + filter.Name, LibraryID: libraryID}
+		seen := map[string]bool{}
+		for _, entry := range filter.Items {
+			id := siloLocalContentID(entry.Path)
+			if item, ok := byID[id]; ok && !seen[id] {
+				spec.MediaIDs = append(spec.MediaIDs, id)
+				seen[id] = true
+				spec.Artwork = append(spec.Artwork, provider.CollectionArtwork{MediaID: id, PosterURL: item.PosterURL, BackdropURL: item.BackdropURL, ReleaseDate: item.ReleaseDate, AddedAt: item.AddedAt})
+			}
+		}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
+func stashFilterSpecsFromMedia(filters []provider.StashSavedFilter, media []runtimehost.CatalogMediaItem, prefix string) []provider.CollectionSpec {
+	byScene := map[string]map[string][]string{}
+	for _, item := range media {
+		if item.MediaID == "" || item.LibraryID == "" || !strings.HasPrefix(item.ExternalID, "stash:") {
+			continue
+		}
+		if byScene[item.LibraryID] == nil {
+			byScene[item.LibraryID] = map[string][]string{}
+		}
+		sceneID := strings.TrimPrefix(item.ExternalID, "stash:")
+		byScene[item.LibraryID][sceneID] = append(byScene[item.LibraryID][sceneID], item.MediaID)
+	}
+	specs := []provider.CollectionSpec{}
+	for lib, scenes := range byScene {
+		for _, filter := range filters {
+			spec := provider.CollectionSpec{Kind: "stash_preset", PresetKey: filter.ID, Name: prefix + filter.Name, LibraryID: lib}
+			seen := map[string]bool{}
+			for _, entry := range filter.Items {
+				for _, id := range scenes[entry.SceneID] {
+					if !seen[id] {
+						spec.MediaIDs = append(spec.MediaIDs, id)
+						seen[id] = true
+					}
+				}
+			}
+			specs = append(specs, spec)
+		}
+	}
+	return specs
 }
 
 // selectedFilterSnapshot applies exact saved-filter names or numeric IDs. A

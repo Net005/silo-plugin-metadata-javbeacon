@@ -31,8 +31,10 @@ type Provider struct {
 	siloAPIKey     string
 	siloBaseURL    string
 	siloLibraryID  string
-	savedFilters   string
-	filterPrefix   string
+	stashFilters   string
+	stashPrefix    string
+	javFilters     string
+	javPrefix      string
 	lastSyncedAt   string
 	snapshotMu     sync.Mutex
 	snapshot       *LibrarySync
@@ -66,19 +68,18 @@ func (p *Provider) ConfigureSiloConnection(baseURL, libraryID, key string) {
 	p.siloLibraryID = libraryID
 }
 
-// ConfigureSavedFilters limits collection import to exact preset names or IDs.
-// An empty selection retains the historical behavior of importing all presets.
-func (p *Provider) ConfigureSavedFilters(selection, prefix string) {
+// ConfigureSavedFilters keeps Stash and JAVBeacon filter settings independent.
+func (p *Provider) ConfigureSavedFilters(stashSelection, stashPrefix, javSelection, javPrefix string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.savedFilters = selection
-	p.filterPrefix = prefix
+	p.stashFilters, p.stashPrefix = stashSelection, stashPrefix
+	p.javFilters, p.javPrefix = javSelection, javPrefix
 }
 
-func (p *Provider) SavedFilterSettings() (string, string) {
+func (p *Provider) SavedFilterSettings() (stashSelection, stashPrefix, javSelection, javPrefix string) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.savedFilters, p.filterPrefix
+	return p.stashFilters, p.stashPrefix, p.javFilters, p.javPrefix
 }
 
 // SiloBaseURL is the configured admin API endpoint. It avoids a callback to

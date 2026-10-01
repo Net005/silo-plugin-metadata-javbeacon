@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.39] - 2026-10-01
+
+### Added
+
+- Separate JAVBeacon Release Library and StashApp scene saved-filter selection and collection prefixes. Preserve the existing JAVBeacon settings, import selected Stash filters through the new JAVBeacon API, and match Stash members by exact local file path. Stash import is opt-in; changing either selection reconciles only plugin-owned collections for that source. Requires JAVBeacon v1.0.274 or later for Stash filter import.
+
 ## [0.4.38] - 2026-10-01
 
 ### Added

@@ -18,6 +18,7 @@ import (
 type CollectionSpec struct {
 	Kind      string
 	PresetID  int64
+	PresetKey string
 	Name      string
 	LibraryID string
 	MediaIDs  []string
@@ -50,6 +51,9 @@ type siloCollection struct {
 func collectionSlug(spec CollectionSpec) string {
 	if spec.Kind == "watchlist" {
 		return "javbeacon-watchlist-library-" + strings.ToLower(spec.LibraryID)
+	}
+	if spec.Kind == "stash_preset" {
+		return "javbeacon-stash-preset-" + url.PathEscape(spec.PresetKey) + "-library-" + strings.ToLower(spec.LibraryID)
 	}
 	return "javbeacon-preset-" + strconv.FormatInt(spec.PresetID, 10) + "-library-" + strings.ToLower(spec.LibraryID)
 }
@@ -165,18 +169,19 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 	activeLibraries := map[string]bool{}
 	for _, spec := range specs {
 		activeLibraries[spec.LibraryID] = true
-		if (spec.Kind != "watchlist" && (spec.Kind != "preset" || spec.PresetID <= 0)) || spec.LibraryID == "" {
+		if (spec.Kind != "watchlist" && (spec.Kind != "preset" || spec.PresetID <= 0) && (spec.Kind != "stash_preset" || spec.PresetKey == "")) || spec.LibraryID == "" {
 			continue
 		}
 		desired[collectionSlug(spec)] = spec
 	}
-	prune := len(pruneUnselected) > 0 && pruneUnselected[0]
+	pruneJAV := len(pruneUnselected) > 0 && pruneUnselected[0]
+	pruneStash := len(pruneUnselected) > 1 && pruneUnselected[1]
 	// Reconcile formerly managed collections too when a saved preset is
 	// removed or no matching media remain. Keep the empty collection rather
 	// than deleting an administrator-visible object without a restore path.
 	for _, item := range existing {
-		if (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) && strings.HasPrefix(item.Description, collectionOwner) {
-			if _, ok := desired[item.Slug]; !ok && !(prune && strings.HasPrefix(item.Slug, "javbeacon-preset-")) {
+		if (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-stash-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) && strings.HasPrefix(item.Description, collectionOwner) {
+			if _, ok := desired[item.Slug]; !ok && !(pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) && !(pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-")) {
 				desired[item.Slug] = CollectionSpec{LibraryID: item.LibraryID}
 			}
 		}
@@ -201,9 +206,9 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 	sort.Strings(slugs)
 	// A nonblank selection removes only plugin-owned preset collections that
 	// are no longer selected. User-owned and Watchlist collections are kept.
-	if prune {
+	if pruneJAV || pruneStash {
 		for _, item := range existing {
-			if !strings.HasPrefix(item.Slug, "javbeacon-preset-") || !strings.HasPrefix(item.Description, collectionOwner) || !activeLibraries[item.LibraryID] {
+			if !(pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) && !(pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-")) || !strings.HasPrefix(item.Description, collectionOwner) || !activeLibraries[item.LibraryID] {
 				continue
 			}
 			if _, ok := desired[item.Slug]; ok {
@@ -235,7 +240,12 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 			if spec.Name == "" {
 				continue
 			}
-			payload := map[string]any{"title": spec.Name, "slug": slug, "collection_type": "manual", "library_id": spec.LibraryID, "description": collectionOwner + " " + spec.Kind + " ID: " + strconv.FormatInt(spec.PresetID, 10)}
+			payload := map[string]any{"title": spec.Name, "slug": slug, "collection_type": "manual", "library_id": spec.LibraryID, "description": collectionOwner + " " + spec.Kind + " ID: " + func() string {
+				if spec.Kind == "stash_preset" {
+					return spec.PresetKey
+				}
+				return strconv.FormatInt(spec.PresetID, 10)
+			}()}
 			if err := c.collectionRequest(ctx, http.MethodPost, "/api/v2/admin/collections", payload, &collection); err != nil {
 				return changed, false, err
 			}
@@ -370,7 +380,7 @@ func alphabetizeManagedSlots(ids []string, byID map[string]siloCollection) ([]st
 	managed := []string{}
 	for index, id := range ids {
 		item, ok := byID[id]
-		if ok && item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
+		if ok && item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-stash-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
 			slots = append(slots, index)
 			managed = append(managed, id)
 		}
@@ -398,7 +408,7 @@ func (c *SiloClient) sortManagedCollections(ctx context.Context, existing []silo
 	libraries := map[string]bool{}
 	for _, item := range existing {
 		byID[item.ID] = item
-		if item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
+		if item.GroupID == nil && strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-stash-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) {
 			libraries[item.LibraryID] = true
 		}
 	}
