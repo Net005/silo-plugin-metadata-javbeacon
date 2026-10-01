@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.41] - 2026-10-01
+
+### Fixed
+
+- Acknowledge scheduled collection sync within one second so Silo does not mark the task failed while the resident worker pages through all enabled movie libraries. The worker continues reconciliation and logs failures.
+
 ## [0.4.40] - 2026-10-01
 
 ### Fixed

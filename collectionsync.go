@@ -90,9 +90,10 @@ func (s *collectionSyncTaskServer) startCollectionSync() (<-chan collectionSyncR
 	return done, true
 }
 
-// Silo's scheduled-task RPC has a hard ten-second control deadline even when
-// a trigger advertises thirty seconds. Let the resident worker finish the
-// sync and return its result when quick; otherwise report that it continues.
+// Silo's scheduled-task RPC has a shorter control deadline than the trigger's
+// advertised runtime. A collection sync must page through every local movie
+// library and can take longer than that deadline, so acknowledge its resident
+// worker promptly. The worker retains its own timeout and logs failures.
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := canonicalTaskKey(req.GetTaskKey())
 	if taskKey == "collection-sync" {
@@ -100,7 +101,7 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 		if !started {
 			return taskOutput(map[string]any{"status": "running"})
 		}
-		timer := time.NewTimer(8 * time.Second)
+		timer := time.NewTimer(time.Second)
 		defer timer.Stop()
 		select {
 		case result := <-done:
