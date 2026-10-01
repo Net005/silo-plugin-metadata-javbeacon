@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -27,12 +30,14 @@ type collectionSyncTaskServer struct {
 	runtime *runtimeServer
 	// log is nil-safe (see the log() helper below) so existing tests that
 	// construct this struct directly without setting it keep working.
-	log             hclog.Logger
-	mu              sync.Mutex
-	running         map[string]bool
-	matchCursor     string
-	matchOffset     int
-	metadataPending *metadataRefreshBatch
+	log                       hclog.Logger
+	mu                        sync.Mutex
+	running                   map[string]bool
+	matchCursor               string
+	matchOffset               int
+	metadataPending           *metadataRefreshBatch
+	lastCollectionFingerprint string
+	lastCollectionFull        time.Time
 }
 
 // log returns s.log, or a discarding no-op logger if it was never set (e.g.
@@ -63,7 +68,7 @@ type collectionSyncResult struct {
 	err     error
 }
 
-func (s *collectionSyncTaskServer) startCollectionSync() (<-chan collectionSyncResult, bool) {
+func (s *collectionSyncTaskServer) startCollectionSync(force bool) (<-chan collectionSyncResult, bool) {
 	s.mu.Lock()
 	if s.running == nil {
 		s.running = make(map[string]bool)
@@ -78,7 +83,7 @@ func (s *collectionSyncTaskServer) startCollectionSync() (<-chan collectionSyncR
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		summary, err := s.sync(ctx)
+		summary, err := s.sync(ctx, force)
 		if err != nil {
 			s.logger().Error("collection sync failed", "err", err)
 		}
@@ -97,7 +102,7 @@ func (s *collectionSyncTaskServer) startCollectionSync() (<-chan collectionSyncR
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := canonicalTaskKey(req.GetTaskKey())
 	if taskKey == "collection-sync" {
-		done, started := s.startCollectionSync()
+		done, started := s.startCollectionSync(true)
 		if !started {
 			return taskOutput(map[string]any{"status": "running"})
 		}
@@ -180,14 +185,15 @@ func taskOutput(summary map[string]any) (*pluginv1.RunScheduledTaskResponse, err
 }
 
 func (s *collectionSyncTaskServer) poll() {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		s.startCollectionSync()
+	for {
+		s.startCollectionSync(false)
+		<-ticker.C
 	}
 }
 
-func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, error) {
+func (s *collectionSyncTaskServer) sync(ctx context.Context, force bool) (map[string]any, error) {
 	snapshot, err := s.runtime.provider.LibrarySync(ctx)
 	if err != nil {
 		return nil, err
@@ -212,6 +218,13 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		if err != nil {
 			return nil, fmt.Errorf("Stash saved filters: %w", err)
 		}
+	}
+	fingerprint, err := collectionSourceFingerprint(snapshot, stashFilters, stashSelection, stashPrefix, javSelection, javPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !force && fingerprint == s.lastCollectionFingerprint && time.Since(s.lastCollectionFull) < 5*time.Minute {
+		return map[string]any{"status": "unchanged", "revision": snapshot.Revision}, nil
 	}
 	libraries, err := client.ListJAVBeaconMovieLibraries(ctx)
 	if err != nil {
@@ -255,7 +268,29 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		return map[string]any{"status": "partial", "reason": "batch_limit", "collections": len(specs), "changes": changed, "watched_changes": 0}, nil
 	}
 	s.runtime.provider.SetLastSyncedRevision(snapshot.Revision)
+	s.lastCollectionFingerprint = fingerprint
+	s.lastCollectionFull = time.Now()
 	return map[string]any{"status": "ok", "revision": snapshot.Revision, "collections": len(specs), "changes": changed, "watched_changes": 0}, nil
+}
+
+// collectionSourceFingerprint tracks only source fields that affect collection
+// membership or ordering. Watched history is synchronized by a separate worker.
+func collectionSourceFingerprint(snapshot *provider.LibrarySync, stashFilters []provider.StashSavedFilter, stashSelection, stashPrefix, javSelection, javPrefix string) (string, error) {
+	data, err := json.Marshal(struct {
+		Watchlist      []provider.LibrarySyncItem
+		Presets        []provider.FilterPresetCollection
+		Codes          map[int64]string
+		StashFilters   []provider.StashSavedFilter
+		StashSelection string
+		StashPrefix    string
+		JAVSelection   string
+		JAVPrefix      string
+	}{snapshot.Watchlist, snapshot.FilterPresets, snapshot.ReleaseCodes, stashFilters, stashSelection, stashPrefix, javSelection, javPrefix})
+	if err != nil {
+		return "", fmt.Errorf("collection-sync: encode source fingerprint: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func syncItemCode(entry provider.LibrarySyncItem, codes map[int64]string) string {

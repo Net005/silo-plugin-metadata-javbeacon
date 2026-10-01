@@ -24,6 +24,35 @@ func TestCollectionSpecsPreserveSourceOrderAndStashFallback(t *testing.T) {
 	}
 }
 
+func TestCollectionSourceFingerprintTracksMembershipButNotWatchedHistory(t *testing.T) {
+	snapshot := &provider.LibrarySync{
+		Watchlist:     []provider.LibrarySyncItem{{ReleaseID: 1}},
+		Watched:       []provider.LibrarySyncItem{{ReleaseID: 9}},
+		FilterPresets: []provider.FilterPresetCollection{{ID: 4, ReleaseIDs: []int64{1}}},
+		ReleaseCodes:  map[int64]string{1: "ABC-1"},
+	}
+	filters := []provider.StashSavedFilter{{ID: "3", Items: []provider.StashSavedFilterItem{{SceneID: "8", Path: "/stash/one.mp4"}}}}
+	first, err := collectionSourceFingerprint(snapshot, filters, "Watchlist", "Stash | ", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Watched = append(snapshot.Watched, provider.LibrarySyncItem{ReleaseID: 10})
+	unchanged, err := collectionSourceFingerprint(snapshot, filters, "Watchlist", "Stash | ", "", "")
+	if err != nil || unchanged != first {
+		t.Fatalf("watched history changed fingerprint: %q %v", unchanged, err)
+	}
+	filters[0].Items[0].Path = "/stash/two.mp4"
+	changed, err := collectionSourceFingerprint(snapshot, filters, "Watchlist", "Stash | ", "", "")
+	if err != nil || changed == first {
+		t.Fatalf("Stash membership did not change fingerprint: %q %v", changed, err)
+	}
+	snapshot.Watchlist = append(snapshot.Watchlist, provider.LibrarySyncItem{ReleaseID: 2})
+	changedAgain, err := collectionSourceFingerprint(snapshot, filters, "Watchlist", "Stash | ", "", "")
+	if err != nil || changedAgain == changed {
+		t.Fatalf("Watchlist membership did not change fingerprint: %q %v", changedAgain, err)
+	}
+}
+
 func TestCanonicalTaskKey(t *testing.T) {
 	for input, want := range map[string]string{"match-unmatched": "match-unmatched", "plugin:5:match-unmatched": "match-unmatched", "collection-sync": "collection-sync", "plugin:5:collection-sync": "collection-sync"} {
 		if got := canonicalTaskKey(input); got != want {

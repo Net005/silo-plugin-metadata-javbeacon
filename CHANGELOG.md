@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.42] - 2026-10-01
+
+### Improved
+
+- Check Watchlist and selected JAVBeacon and Stash saved-filter membership every 30 seconds, reconciling existing collections as soon as the source changes. Skip the expensive Silo catalog scan when membership is unchanged, and retain a full pass every five minutes plus the scheduled task to catch local library changes.
+
 ## [0.4.41] - 2026-10-01
 
 ### Fixed
