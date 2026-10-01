@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.40] - 2026-10-01
+
+### Fixed
+
+- Discover all enabled Silo movie libraries whose provider chain enables JAVBeacon when syncing Watchlist and saved-filter collections. Match each collection only to local items in that library instead of placing every Stash collection under the configured JAV library.
+- Remove plugin-owned per-library collections when that library has no matching members. Preserve administrator-created collections and source ordering.
+
 ## [0.4.39] - 2026-10-01
 
 ### Added

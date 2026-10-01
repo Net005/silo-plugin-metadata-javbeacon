@@ -120,9 +120,52 @@ func (c *SiloClient) MarkWatched(ctx context.Context, profileID, contentID strin
 // playback history. Watch sync is not confined to the metadata plugin's
 // configured JAV library.
 type MovieLibrary struct {
-	ID    string   `json:"id"`
-	Type  string   `json:"type"`
-	Paths []string `json:"paths"`
+	ID      string   `json:"id"`
+	Type    string   `json:"type"`
+	Enabled bool     `json:"enabled"`
+	Paths   []string `json:"paths"`
+}
+
+// ListJAVBeaconMovieLibraries returns only enabled movie libraries whose movie
+// provider chain enables this plugin. The configured single library ID is not
+// authoritative for collection placement.
+func (c *SiloClient) ListJAVBeaconMovieLibraries(ctx context.Context) ([]MovieLibrary, error) {
+	libraries, err := c.ListMovieLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MovieLibrary, 0, len(libraries))
+	for _, library := range libraries {
+		if !library.Enabled {
+			continue
+		}
+		var config struct {
+			Levels []struct {
+				ContentLevel string `json:"content_level"`
+				Entries      []struct {
+					CapabilityID string `json:"capability_id"`
+					ProviderSlug string `json:"provider_slug"`
+					Enabled      bool   `json:"enabled"`
+				} `json:"entries"`
+			} `json:"levels"`
+		}
+		path := "/api/v2/libraries/" + url.PathEscape(library.ID) + "/providers"
+		if err := c.collectionRequest(ctx, http.MethodGet, path, nil, &config); err != nil {
+			return nil, fmt.Errorf("silo: providers for library %s: %w", library.ID, err)
+		}
+		for _, level := range config.Levels {
+			if level.ContentLevel != "movie" {
+				continue
+			}
+			for _, entry := range level.Entries {
+				if entry.Enabled && entry.CapabilityID == "javbeacon" && entry.ProviderSlug == "javbeacon" {
+					out = append(out, library)
+					break
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 func (c *SiloClient) ListMovieLibraries(ctx context.Context) ([]MovieLibrary, error) {

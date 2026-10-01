@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.39",
+  "version": "0.4.40",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -136,7 +136,7 @@
           {
             "key": "silo_library_id",
             "label": "Silo library ID",
-            "description": "Library containing your local JAV media. Collection sync lists only this library.",
+            "description": "Legacy/default library for targeted metadata refresh. Collection sync discovers every enabled movie library with JAVBeacon selected as a metadata provider.",
             "control": "ADMIN_FORM_CONTROL_TEXT",
             "placeholder": "16",
             "required": false

@@ -13,7 +13,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtimehost"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -197,7 +196,6 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 		return map[string]any{"status": "skipped", "reason": "Silo API key is not configured"}, nil
 	}
 	baseURL := s.runtime.provider.SiloBaseURL()
-	libraryID := s.runtime.provider.SiloLibraryID()
 	if baseURL == "" {
 		return nil, fmt.Errorf("collection-sync: Silo URL is required")
 	}
@@ -214,36 +212,38 @@ func (s *collectionSyncTaskServer) sync(ctx context.Context) (map[string]any, er
 			return nil, fmt.Errorf("Stash saved filters: %w", err)
 		}
 	}
-	var specs []provider.CollectionSpec
-	var catalog []provider.CatalogItem
-	var codes map[int64]string
-	if libraryID != "" {
-		catalog, _, err = client.ListLibraryCatalogForProfile(ctx, libraryID)
+	libraries, err := client.ListJAVBeaconMovieLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	codes := snapshot.ReleaseCodes
+	if codes == nil {
+		codes, err = s.runtime.provider.LocalReleaseCodes(ctx)
 		if err != nil {
 			return nil, err
 		}
-		codes = snapshot.ReleaseCodes
-		if codes == nil {
-			codes, err = s.runtime.provider.LocalReleaseCodes(ctx)
-			if err != nil {
-				return nil, err
+	}
+	var specs []provider.CollectionSpec
+	for _, library := range libraries {
+		catalog, _, err := client.ListLibraryCatalogForProfile(ctx, library.ID)
+		if err != nil {
+			return nil, fmt.Errorf("collection-sync: library %s: %w", library.ID, err)
+		}
+		// The scope entry lets reconciliation remove stale owned collections
+		// even when every filter has zero local matches in this library.
+		specs = append(specs, provider.CollectionSpec{Kind: "library", LibraryID: library.ID})
+		for _, spec := range collectionSpecsFromCatalog(snapshot, catalog, codes, library.ID) {
+			if len(spec.MediaIDs) > 0 {
+				specs = append(specs, spec)
 			}
 		}
-		specs = collectionSpecsFromCatalog(snapshot, catalog, codes, libraryID)
-		specs = append(specs, stashFilterSpecsFromCatalog(stashFilters, catalog, libraryID, stashPrefix)...)
-	} else {
-		host := sdkruntime.Host()
-		if host == nil {
-			return nil, fmt.Errorf("collection-sync: Silo library ID is required")
+		for _, spec := range stashFilterSpecsFromCatalog(stashFilters, catalog, library.ID, stashPrefix) {
+			if len(spec.MediaIDs) > 0 {
+				specs = append(specs, spec)
+			}
 		}
-		media, err := listJAVMedia(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		specs = collectionSpecs(snapshot, media)
-		specs = append(specs, stashFilterSpecsFromMedia(stashFilters, media, stashPrefix)...)
 	}
-	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400, strings.TrimSpace(javSelection) != "", true)
+	changed, complete, err := client.SyncCollectionsBatch(ctx, specs, 400, strings.TrimSpace(javSelection) != "", true, true)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 429") {
 			return map[string]any{"status": "partial", "reason": "rate_limited", "changes": changed, "watched_changes": 0}, nil

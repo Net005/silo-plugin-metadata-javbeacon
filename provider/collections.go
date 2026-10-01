@@ -176,12 +176,12 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 	}
 	pruneJAV := len(pruneUnselected) > 0 && pruneUnselected[0]
 	pruneStash := len(pruneUnselected) > 1 && pruneUnselected[1]
-	// Reconcile formerly managed collections too when a saved preset is
-	// removed or no matching media remain. Keep the empty collection rather
-	// than deleting an administrator-visible object without a restore path.
+	pruneEmpty := len(pruneUnselected) > 2 && pruneUnselected[2]
+	// Keep prior collections by default. Multi-library sync explicitly opts into
+	// removing an owned collection when it has no local matches in its library.
 	for _, item := range existing {
 		if (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-stash-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-")) && strings.HasPrefix(item.Description, collectionOwner) {
-			if _, ok := desired[item.Slug]; !ok && !(pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) && !(pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-")) {
+			if _, ok := desired[item.Slug]; !ok && !(pruneEmpty && activeLibraries[item.LibraryID]) && !(pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) && !(pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-")) {
 				desired[item.Slug] = CollectionSpec{LibraryID: item.LibraryID}
 			}
 		}
@@ -206,9 +206,11 @@ func (c *SiloClient) SyncCollectionsBatch(ctx context.Context, specs []Collectio
 	sort.Strings(slugs)
 	// A nonblank selection removes only plugin-owned preset collections that
 	// are no longer selected. User-owned and Watchlist collections are kept.
-	if pruneJAV || pruneStash {
+	if pruneJAV || pruneStash || pruneEmpty {
 		for _, item := range existing {
-			if !(pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) && !(pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-")) || !strings.HasPrefix(item.Description, collectionOwner) || !activeLibraries[item.LibraryID] {
+			owned := strings.HasPrefix(item.Description, collectionOwner) && (strings.HasPrefix(item.Slug, "javbeacon-preset-") || strings.HasPrefix(item.Slug, "javbeacon-stash-preset-") || strings.HasPrefix(item.Slug, "javbeacon-watchlist-"))
+			prunable := pruneEmpty || (pruneJAV && strings.HasPrefix(item.Slug, "javbeacon-preset-")) || (pruneStash && strings.HasPrefix(item.Slug, "javbeacon-stash-preset-"))
+			if !owned || !prunable || !activeLibraries[item.LibraryID] {
 				continue
 			}
 			if _, ok := desired[item.Slug]; ok {
