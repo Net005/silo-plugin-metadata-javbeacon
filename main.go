@@ -82,6 +82,7 @@ func (s *runtimeServer) Configure(_ context.Context, req *pluginv1.ConfigureRequ
 			go s.collectionSync.pollMetadata()
 			go s.collectionSync.pollWatched()
 			go s.collectionSync.pollMatch()
+			go s.collectionSync.pollRepair()
 		})
 	}
 	return &pluginv1.ConfigureResponse{}, nil

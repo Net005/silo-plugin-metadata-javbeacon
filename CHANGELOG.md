@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.44] - 2026-10-02
+
+### Improved
+
+- Separate unmatched matching, matched-item metadata repair, incremental metadata refresh, watched-state import, and collections into independently runnable scheduled tasks. Keep their resident polling for fast updates and prevent overlapping runs of each task. A long unmatched scan no longer delays missing-cast repair.
+
 ## [0.4.43] - 2026-10-02
 
 ### Fixed

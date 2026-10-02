@@ -15,26 +15,47 @@ import (
 // pollMetadata is deliberately separate from collection reconciliation. A
 // slow collection run must never postpone a new release or Stash scene edit.
 func (s *collectionSyncTaskServer) pollMetadata() {
-	var since time.Time
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		next, count, err := s.syncChangedMetadata(ctx, since)
-		cancel()
-		if err != nil {
-			s.logger().Warn("incremental metadata refresh failed; retaining cursor for retry", "since", since, "error", err)
-		} else {
-			if count > 0 {
-				s.logger().Info("incremental metadata refresh jobs submitted", "items", count)
-			}
-			if !next.IsZero() {
-				since = next
-				s.logger().Debug("incremental metadata changes acknowledged", "cursor", next)
-			}
-		}
+		s.startMetadataSync()
 		<-ticker.C
 	}
+}
+
+func (s *collectionSyncTaskServer) startMetadataSync() (<-chan collectionSyncResult, bool) {
+	s.mu.Lock()
+	if s.running == nil {
+		s.running = make(map[string]bool)
+	}
+	if s.running["metadata-refresh"] {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.running["metadata-refresh"] = true
+	since := s.metadataSince
+	s.mu.Unlock()
+	done := make(chan collectionSyncResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		next, count, err := s.syncChangedMetadata(ctx, since)
+		if err != nil {
+			s.logger().Warn("incremental metadata refresh failed; retaining cursor for retry", "since", since, "error", err)
+		}
+		summary := map[string]any{"status": "ok", "submitted": count}
+		s.mu.Lock()
+		if err == nil && !next.IsZero() {
+			s.metadataSince = next
+		}
+		delete(s.running, "metadata-refresh")
+		s.mu.Unlock()
+		if err != nil {
+			summary["status"] = "error"
+		}
+		done <- collectionSyncResult{summary, err}
+	}()
+	return done, true
 }
 
 type metadataRefreshBatch struct {

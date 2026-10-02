@@ -38,6 +38,7 @@ type collectionSyncTaskServer struct {
 	repairCursor              map[string]string
 	repairChecked             map[string]time.Time
 	metadataPending           *metadataRefreshBatch
+	metadataSince             time.Time
 	lastCollectionFingerprint string
 	lastCollectionFull        time.Time
 }
@@ -54,8 +55,10 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 }
 
 func canonicalTaskKey(key string) string {
-	if key == "match-unmatched" || strings.HasSuffix(key, ":match-unmatched") {
-		return "match-unmatched"
+	for _, task := range []string{"collection-sync", "match-unmatched", "repair-matched", "metadata-refresh", "watched-sync"} {
+		if key == task || strings.HasSuffix(key, ":"+task) {
+			return task
+		}
 	}
 	return "collection-sync"
 }
@@ -103,30 +106,26 @@ func (s *collectionSyncTaskServer) startCollectionSync(force bool) (<-chan colle
 // worker promptly. The worker retains its own timeout and logs failures.
 func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunScheduledTaskRequest) (*pluginv1.RunScheduledTaskResponse, error) {
 	taskKey := canonicalTaskKey(req.GetTaskKey())
-	if taskKey == "collection-sync" {
-		done, started := s.startCollectionSync(true)
-		if !started {
-			return taskOutput(map[string]any{"status": "running"})
-		}
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
-		select {
-		case result := <-done:
-			if result.err != nil {
-				return nil, result.err
-			}
-			return taskOutput(result.summary)
-		case <-timer.C:
-			return taskOutput(map[string]any{"status": "running", "detail": "Collection and watched-state sync continues in the background"})
-		case <-ctx.Done():
-			return taskOutput(map[string]any{"status": "running"})
-		}
+	var done <-chan collectionSyncResult
+	var started bool
+	switch taskKey {
+	case "match-unmatched":
+		done, started = s.startMatchSync()
+	case "repair-matched":
+		done, started = s.startRepairSync()
+	case "metadata-refresh":
+		done, started = s.startMetadataSync()
+	case "watched-sync":
+		done, started = s.startWatchedSync()
+	default:
+		done, started = s.startCollectionSync(true)
 	}
-	done, started := s.startMatchSync()
 	if !started {
 		return taskOutput(map[string]any{"status": "running"})
 	}
-	timer := time.NewTimer(8 * time.Second)
+	// The scheduled-task RPC has a short control deadline. The worker has
+	// its own context and remains active after this acknowledgement.
+	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
 	case result := <-done:
@@ -135,11 +134,10 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 		}
 		return taskOutput(result.summary)
 	case <-timer.C:
-		return taskOutput(map[string]any{"status": "running", "detail": "Auto-match continues in the background"})
+		return taskOutput(map[string]any{"status": "running", "detail": taskKey + " continues in the background"})
 	case <-ctx.Done():
 		return taskOutput(map[string]any{"status": "running"})
 	}
-
 }
 
 func (s *collectionSyncTaskServer) startMatchSync() (<-chan collectionSyncResult, bool) {
@@ -174,6 +172,52 @@ func (s *collectionSyncTaskServer) pollMatch() {
 	defer ticker.Stop()
 	for {
 		s.startMatchSync()
+		<-ticker.C
+	}
+}
+
+func (s *collectionSyncTaskServer) startRepairSync() (<-chan collectionSyncResult, bool) {
+	s.mu.Lock()
+	if s.running == nil {
+		s.running = make(map[string]bool)
+	}
+	if s.running["repair-matched"] {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.running["repair-matched"] = true
+	s.mu.Unlock()
+	done := make(chan collectionSyncResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		var summary map[string]any
+		var err error
+		if key := s.runtime.provider.SiloAPIKey(); key == "" {
+			summary = map[string]any{"status": "skipped", "reason": "Silo API key is not configured"}
+		} else if baseURL := s.runtime.provider.SiloBaseURL(); baseURL == "" {
+			err = fmt.Errorf("repair-matched: Silo URL is required")
+		} else {
+			var repaired int
+			repaired, err = s.repairMatchedWithoutCast(ctx, provider.NewSiloClient(s.runtime.provider.SiloBaseURL(), key))
+			summary = map[string]any{"status": "ok", "repaired": repaired}
+		}
+		if err != nil {
+			s.logger().Warn("matched-item cast repair failed", "err", err)
+		}
+		done <- collectionSyncResult{summary, err}
+		s.mu.Lock()
+		delete(s.running, "repair-matched")
+		s.mu.Unlock()
+	}()
+	return done, true
+}
+
+func (s *collectionSyncTaskServer) pollRepair() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		s.startRepairSync()
 		<-ticker.C
 	}
 }

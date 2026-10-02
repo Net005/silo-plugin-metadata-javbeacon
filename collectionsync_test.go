@@ -54,7 +54,7 @@ func TestCollectionSourceFingerprintTracksMembershipButNotWatchedHistory(t *test
 }
 
 func TestCanonicalTaskKey(t *testing.T) {
-	for input, want := range map[string]string{"match-unmatched": "match-unmatched", "plugin:5:match-unmatched": "match-unmatched", "collection-sync": "collection-sync", "plugin:5:collection-sync": "collection-sync"} {
+	for input, want := range map[string]string{"match-unmatched": "match-unmatched", "plugin:5:match-unmatched": "match-unmatched", "collection-sync": "collection-sync", "plugin:5:collection-sync": "collection-sync", "repair-matched": "repair-matched", "plugin:5:repair-matched": "repair-matched", "metadata-refresh": "metadata-refresh", "watched-sync": "watched-sync"} {
 		if got := canonicalTaskKey(input); got != want {
 			t.Errorf("%q => %q, want %q", input, got, want)
 		}

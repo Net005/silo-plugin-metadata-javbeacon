@@ -15,16 +15,43 @@ func (s *collectionSyncTaskServer) pollWatched() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		changed, complete, err := s.syncWatched(ctx)
-		cancel()
-		if err != nil {
-			s.logger().Warn("Stash watched-state sync failed", "error", err)
-		} else if changed > 0 {
-			s.logger().Info("Stash watched state imported", "items", changed, "complete", complete)
-		}
+		s.startWatchedSync()
 		<-ticker.C
 	}
+}
+
+func (s *collectionSyncTaskServer) startWatchedSync() (<-chan collectionSyncResult, bool) {
+	s.mu.Lock()
+	if s.running == nil {
+		s.running = make(map[string]bool)
+	}
+	if s.running["watched-sync"] {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.running["watched-sync"] = true
+	s.mu.Unlock()
+	done := make(chan collectionSyncResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		changed, complete, err := s.syncWatched(ctx)
+		if err != nil {
+			s.logger().Warn("Stash watched-state sync failed", "error", err)
+		}
+		if err == nil && changed > 0 {
+			s.logger().Info("Stash watched state imported", "items", changed, "complete", complete)
+		}
+		summary := map[string]any{"status": "ok", "changed": changed, "complete": complete}
+		if err != nil {
+			summary["status"] = "error"
+		}
+		s.mu.Lock()
+		delete(s.running, "watched-sync")
+		s.mu.Unlock()
+		done <- collectionSyncResult{summary, err}
+	}()
+	return done, true
 }
 
 func sceneBelongsToLibrary(path string, library provider.MovieLibrary) bool {

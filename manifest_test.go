@@ -18,8 +18,8 @@ func TestEmbeddedManifestIsValid(t *testing.T) {
 	if m.GetPluginId() != "javbeacon.metadata" {
 		t.Errorf("plugin_id = %q, want javbeacon.metadata", m.GetPluginId())
 	}
-	if len(m.GetCapabilities()) != 5 {
-		t.Fatalf("capabilities = %d, want 5", len(m.GetCapabilities()))
+	if len(m.GetCapabilities()) != 8 {
+		t.Fatalf("capabilities = %d, want 8", len(m.GetCapabilities()))
 	}
 }
 

@@ -111,15 +111,11 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 		}
 		cursor = next
 	}
-	repaired, repairErr := s.repairMatchedWithoutCast(ctx, siloClient)
-	if repairErr != nil {
-		log.Warn("matched-item cast repair failed", "err", repairErr)
-	}
 	s.mu.Lock()
 	s.matchCursor = cursor
 	s.matchOffset = offset
 	s.mu.Unlock()
-	return map[string]any{"status": "ok", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": false, "repaired_incomplete": repaired}, nil
+	return map[string]any{"status": "ok", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": false}, nil
 }
 
 // exactProviderIDForItem checks every media filename before the parsed title.

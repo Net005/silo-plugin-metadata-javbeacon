@@ -1,6 +1,6 @@
 {
   "plugin_id": "javbeacon.metadata",
-  "version": "0.4.43",
+  "version": "0.4.44",
   "checksum": "__CHECKSUM__",
   "silo_api_version": "v1",
   "presentation": {
@@ -86,7 +86,25 @@
       "type": "scheduled_task.v1",
       "id": "match-unmatched",
       "display_name": "Auto-match unmatched JAVBeacon items",
-      "description": "Silo's own auto-matcher scores search results against the local file's title and year, and JAV releases frequently have no year in their filename - so even an exact release-code title match can score below Silo's auto-accept threshold and sit as unmatched or ambiguous. This task walks Silo's unmatched-items list, re-checks each one against JAVBeacon's own search for an exact release-code hit, and force-applies that match via Silo's admin API (POST /api/v2/admin/items/{id}/match/apply) when the hit is unambiguous - including picking the more fully scraped one automatically when JAVBeacon has two releases sharing that exact code, breaking exact-code ties by stable release ID. Requires the Silo API key set below. Run it on a schedule, or trigger it manually after a scan."
+      "description": "Match local Silo items that are unmatched or ambiguous against exact JAVBeacon release codes or Stash scenes."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "repair-matched",
+      "display_name": "Repair matched JAVBeacon metadata",
+      "description": "Check recent and older already-matched Silo items for missing cast and reapply only verified same-scene JAVBeacon or Stash metadata."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "metadata-refresh",
+      "display_name": "Refresh changed JAVBeacon metadata",
+      "description": "Submit and verify Silo refresh jobs for releases and Stash scenes changed since the last acknowledged source update."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "watched-sync",
+      "display_name": "Import Stash watched state",
+      "description": "Apply Stash playback history to local Silo items across movie libraries."
     }
   ],
   "global_config_schema": [
