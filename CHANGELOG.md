@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.43] - 2026-10-02
+
+### Fixed
+
+- Repair matched Silo items whose scan left cast or other metadata empty. Check the newest items on each auto-match run while paging through older matches; reapply only an exact release code tied to the same Stash scene. Include Stash-only scenes.
+
 ## [0.4.42] - 2026-10-01
 
 ### Improved

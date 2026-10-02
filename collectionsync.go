@@ -35,6 +35,8 @@ type collectionSyncTaskServer struct {
 	running                   map[string]bool
 	matchCursor               string
 	matchOffset               int
+	repairCursor              map[string]string
+	repairChecked             map[string]time.Time
 	metadataPending           *metadataRefreshBatch
 	lastCollectionFingerprint string
 	lastCollectionFull        time.Time

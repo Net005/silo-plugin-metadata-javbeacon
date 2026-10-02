@@ -147,3 +147,36 @@ func TestFilenameReleaseCodeWithQualitySuffix(t *testing.T) {
 		}
 	}
 }
+
+func TestExactProviderForSceneRequiresSameSceneAndCast(t *testing.T) {
+	results := []provider.Metadata{
+		{ReleaseID: 9, Code: "ZIZG-020", StashSceneID: "999", Performers: []string{"Wrong"}},
+		{ReleaseID: 8, Code: "ZIZG-020", StashSceneID: "42814"},
+		{ReleaseID: 7, Code: "ZIZG-020", StashSceneID: "42814", Performers: []string{"Right"}},
+	}
+	if got := exactProviderForScene(results, "zizg020", "42814"); got != "7" {
+		t.Fatalf("provider = %q, want 7", got)
+	}
+	if got := exactProviderForScene(results, "zizg020", "999"); got != "9" {
+		t.Fatalf("other scene = %q, want 9", got)
+	}
+	if got := exactProviderForScene(results, "zizg020", "1000"); got != "" {
+		t.Fatalf("unrelated scene = %q", got)
+	}
+}
+
+func TestExactProviderForSceneAcceptsStashOnly(t *testing.T) {
+	results := []provider.Metadata{{ProviderID: "stash:42815", Code: "SHKD-694", StashSceneID: "42815", Performers: []string{"Actor"}}}
+	if got := exactProviderForScene(results, "SHKD-694", "42815"); got != "stash:42815" {
+		t.Fatalf("provider = %q", got)
+	}
+}
+
+func TestStashSceneFromArtwork(t *testing.T) {
+	if got := stashSceneFromArtwork("https://jav.example/api/v1/integrations/silo/stash/scenes/42814/cover?api_key=secret"); got != "42814" {
+		t.Fatalf("scene = %q", got)
+	}
+	if got := stashSceneFromArtwork("https://jav.example/other/42814"); got != "" {
+		t.Fatalf("unexpected scene = %q", got)
+	}
+}

@@ -193,6 +193,12 @@ func (c *SiloClient) ListUnmatchedItems(ctx context.Context, cursor string) ([]U
 // production year on the local file, which JAV releases frequently do not
 // carry in their filename.
 func (c *SiloClient) ApplyMatch(ctx context.Context, contentID, libraryID, providerID string) error {
+	return c.ApplyMatchWithStash(ctx, contentID, libraryID, providerID, "")
+}
+
+// ApplyMatchWithStash retains the verified scene identity when upgrading a
+// partial Stash match to its exact JAVBeacon release.
+func (c *SiloClient) ApplyMatchWithStash(ctx context.Context, contentID, libraryID, providerID, stashSceneID string) error {
 	if !c.Configured() {
 		return fmt.Errorf("silo: api key is not configured")
 	}
@@ -200,6 +206,9 @@ func (c *SiloClient) ApplyMatch(ctx context.Context, contentID, libraryID, provi
 		return fmt.Errorf("silo: content id and provider id are required")
 	}
 	providerIDs := map[string]string{"javbeacon": providerID}
+	if stashSceneID != "" {
+		providerIDs["stash"] = stashSceneID
+	}
 	if sceneID, ok := strings.CutPrefix(providerID, "stash:"); ok {
 		if sceneID == "" {
 			return fmt.Errorf("silo: Stash scene id is required")

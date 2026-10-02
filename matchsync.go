@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -110,11 +111,15 @@ func (s *collectionSyncTaskServer) matchUnmatched(ctx context.Context) (map[stri
 		}
 		cursor = next
 	}
+	repaired, repairErr := s.repairMatchedWithoutCast(ctx, siloClient)
+	if repairErr != nil {
+		log.Warn("matched-item cast repair failed", "err", repairErr)
+	}
 	s.mu.Lock()
 	s.matchCursor = cursor
 	s.matchOffset = offset
 	s.mu.Unlock()
-	return map[string]any{"status": "ok", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": false}, nil
+	return map[string]any{"status": "ok", "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": false, "repaired_incomplete": repaired}, nil
 }
 
 // exactProviderIDForItem checks every media filename before the parsed title.
@@ -311,4 +316,153 @@ func (s *collectionSyncTaskServer) matchPartial(cursor string, offset, matched, 
 	s.matchOffset = offset
 	s.mu.Unlock()
 	return map[string]any{"status": "partial", "reason": reason, "matched": matched, "skipped": skipped, "failed": failed, "pages": pages, "remaining": true}, nil
+}
+
+// stashSceneFromArtwork reads only the scene ID from an existing JAVBeacon
+// artwork URL. It never trusts a title alone to overwrite an existing match.
+var stashSceneArtwork = regexp.MustCompile(`^/api/v1/integrations/silo/stash/scenes/([0-9]+)/`)
+
+func stashSceneFromArtwork(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	match := stashSceneArtwork.FindStringSubmatch(u.Path)
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
+}
+
+// repairMatchedWithoutCast catches Silo's scan-time partial matches. Those
+// items do not appear in /libraries/unmatched-items, although applying the
+// exact JAV release+scene pair immediately hydrates performers and metadata.
+func (s *collectionSyncTaskServer) repairMatchedWithoutCast(ctx context.Context, client *provider.SiloClient) (int, error) {
+	libraries, err := client.ListJAVBeaconMovieLibraries(ctx)
+	if err != nil {
+		return 0, err
+	}
+	profileID, err := client.PrimaryProfileID(ctx)
+	if err != nil {
+		return 0, err
+	}
+	repaired := 0
+	for _, library := range libraries {
+		if ctx.Err() != nil || shortDeadline(ctx) {
+			break
+		}
+		s.mu.Lock()
+		backlog := s.repairCursor[library.ID]
+		s.mu.Unlock()
+		// Always examine the newest page. The second page advances a cursor
+		// through older matches, so recent additions need not wait for a
+		// whole-library sweep to finish.
+		pages := []string{""}
+		if backlog != "" {
+			pages = append(pages, backlog)
+		}
+		for _, cursor := range pages {
+			if ctx.Err() != nil || shortDeadline(ctx) {
+				break
+			}
+			items, next, err := client.ListMatchedCatalogPage(ctx, library.ID, cursor)
+			if err != nil {
+				return repaired, err
+			}
+			completed := true
+			for _, item := range items {
+				if ctx.Err() != nil || shortDeadline(ctx) {
+					completed = false
+					break
+				}
+				if item.Status != "matched" || item.Type != "movie" {
+					continue
+				}
+				sceneID := stashSceneFromArtwork(item.PosterURL)
+				if sceneID == "" {
+					sceneID = stashSceneFromArtwork(item.BackdropURL)
+				}
+				if sceneID == "" {
+					continue
+				}
+				s.mu.Lock()
+				lastChecked := s.repairChecked[item.ContentID]
+				s.mu.Unlock()
+				if time.Since(lastChecked) < 15*time.Minute {
+					continue
+				}
+				if strings.TrimSpace(item.Overview) != "" || len(item.Genres) != 0 {
+					hasCast, err := client.ItemHasCast(ctx, profileID, item.ContentID)
+					if err != nil {
+						return repaired, err
+					}
+					if hasCast {
+						s.markRepairChecked(item.ContentID)
+						continue
+					}
+				}
+				results, err := s.runtime.provider.Search(ctx, item.Title, 10)
+				if err != nil {
+					return repaired, err
+				}
+				providerID := exactProviderForScene(results, item.Title, sceneID)
+				if providerID == "" {
+					s.markRepairChecked(item.ContentID)
+					continue
+				}
+				if err := client.ApplyMatchWithStash(ctx, item.ContentID, library.ID, providerID, sceneID); err != nil {
+					return repaired, err
+				}
+				s.markRepairChecked(item.ContentID)
+				repaired++
+			}
+			if !completed {
+				break
+			}
+			s.mu.Lock()
+			if s.repairCursor == nil {
+				s.repairCursor = map[string]string{}
+			}
+			s.repairCursor[library.ID] = next
+			s.mu.Unlock()
+		}
+	}
+	return repaired, nil
+}
+
+func (s *collectionSyncTaskServer) markRepairChecked(contentID string) {
+	s.mu.Lock()
+	if s.repairChecked == nil {
+		s.repairChecked = map[string]time.Time{}
+	}
+	s.repairChecked[contentID] = time.Now()
+	s.mu.Unlock()
+}
+
+// exactProviderForScene requires both an exact code and the same Stash scene
+// already represented by Silo. A duplicate code tied to another scene cannot
+// overwrite the existing local item.
+func exactProviderForScene(results []provider.Metadata, title, sceneID string) string {
+	bestID, bestScore := int64(0), -1
+	stashAvailable := false
+	for _, result := range results {
+		if result.StashSceneID != sceneID || normalizedCatalogCode(result.Code) != normalizedCatalogCode(title) || len(result.Performers) == 0 {
+			continue
+		}
+		if result.ReleaseID > 0 {
+			score := completenessScore(result)
+			if bestID == 0 || score > bestScore || (score == bestScore && result.ReleaseID < bestID) {
+				bestID, bestScore = result.ReleaseID, score
+			}
+		} else if result.ProviderID == "stash:"+sceneID {
+			stashAvailable = true
+		}
+	}
+	if bestID > 0 {
+		return strconv.FormatInt(bestID, 10)
+	}
+	if stashAvailable {
+		return "stash:" + sceneID
+	}
+	return ""
 }

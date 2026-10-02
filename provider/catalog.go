@@ -11,16 +11,114 @@ import (
 
 // CatalogItem is a local Silo item in a configured library.
 type CatalogItem struct {
-	ContentID   string `json:"content_id"`
-	Title       string `json:"title"`
-	Type        string `json:"type"`
-	PosterURL   string `json:"poster_url"`
-	BackdropURL string `json:"backdrop_url"`
-	ReleaseDate string `json:"release_date"`
-	AddedAt     string `json:"added_at"`
+	ContentID   string   `json:"content_id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	PosterURL   string   `json:"poster_url"`
+	BackdropURL string   `json:"backdrop_url"`
+	ReleaseDate string   `json:"release_date"`
+	AddedAt     string   `json:"added_at"`
+	Overview    string   `json:"overview"`
+	Genres      []string `json:"genres"`
+	Status      string   `json:"status"`
 	UserState   struct {
 		Played bool `json:"played"`
 	} `json:"user_state"`
+}
+
+// ListMatchedCatalogPage reads one recent-first page for the auto-match
+// repair pass without loading an entire library on every poll.
+func (c *SiloClient) ListMatchedCatalogPage(ctx context.Context, libraryID, cursor string) ([]CatalogItem, string, error) {
+	var profiles struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := c.collectionRequest(ctx, http.MethodGet, "/api/v2/profiles", nil, &profiles); err != nil {
+		return nil, "", err
+	}
+	if len(profiles.Items) == 0 {
+		return nil, "", fmt.Errorf("silo: no profile available for catalog")
+	}
+	path := "/api/v2/catalog?library_id=" + url.QueryEscape(libraryID) + "&limit=200&skip_total=true&status=matched&sort=-added_at"
+	if cursor != "" {
+		path += "&cursor=" + url.QueryEscape(cursor)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Profile-Id", profiles.Items[0].ID)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("silo: catalog HTTP %d", resp.StatusCode)
+	}
+	var data struct {
+		Items []CatalogItem `json:"items"`
+		Page  struct {
+			HasMore    bool   `json:"has_more"`
+			NextCursor string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, "", err
+	}
+	if !data.Page.HasMore {
+		return data.Items, "", nil
+	}
+	if data.Page.NextCursor == "" || data.Page.NextCursor == cursor {
+		return nil, "", fmt.Errorf("silo: catalog pagination did not advance")
+	}
+	return data.Items, data.Page.NextCursor, nil
+}
+
+// ItemHasCast checks the detail record because catalog rows omit cast.
+func (c *SiloClient) ItemHasCast(ctx context.Context, profileID, contentID string) (bool, error) {
+	path := "/api/v2/catalog/items/" + url.PathEscape(contentID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Profile-Id", profileID)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("silo: item detail HTTP %d", resp.StatusCode)
+	}
+	var item struct {
+		Cast []json.RawMessage `json:"cast"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return false, err
+	}
+	return len(item.Cast) > 0, nil
+}
+
+// PrimaryProfileID supplies the profile header required by item details.
+func (c *SiloClient) PrimaryProfileID(ctx context.Context) (string, error) {
+	var profiles struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := c.collectionRequest(ctx, http.MethodGet, "/api/v2/profiles", nil, &profiles); err != nil {
+		return "", err
+	}
+	if len(profiles.Items) == 0 {
+		return "", fmt.Errorf("silo: no profile available")
+	}
+	return profiles.Items[0].ID, nil
 }
 
 // ListLibraryCatalog uses Silo's public v2 catalog rather than a RuntimeHost
