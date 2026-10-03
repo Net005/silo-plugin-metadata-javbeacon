@@ -93,14 +93,15 @@ type PerformerBio struct {
 // jellyfin.Service.Playback and migrateJellyfinPlaybackReleaseNullable in the
 // JAVBeacon repo.
 type PlaybackEvent struct {
-	Event           string  `json:"event"`
-	SessionID       string  `json:"session_id"`
-	ReleaseID       int64   `json:"release_id,omitempty"`
-	StashSceneID    string  `json:"stash_scene_id,omitempty"`
-	PositionSeconds float64 `json:"position_seconds"`
-	RuntimeSeconds  float64 `json:"runtime_seconds"`
-	IsPaused        bool    `json:"is_paused"`
-	IsPlayed        bool    `json:"is_played"`
+	Event           string    `json:"event"`
+	SessionID       string    `json:"session_id"`
+	ReleaseID       int64     `json:"release_id,omitempty"`
+	StashSceneID    string    `json:"stash_scene_id,omitempty"`
+	PositionSeconds float64   `json:"position_seconds"`
+	RuntimeSeconds  float64   `json:"runtime_seconds"`
+	IsPaused        bool      `json:"is_paused"`
+	IsPlayed        bool      `json:"is_played"`
+	OccurredAt      time.Time `json:"occurred_at,omitempty"`
 }
 
 // PlaybackResult mirrors JAVBeacon's internal/jellyfin.PlaybackResult.

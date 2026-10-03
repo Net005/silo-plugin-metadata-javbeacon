@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Net005/silo-plugin-metadata-javbeacon/provider"
 )
@@ -166,5 +168,57 @@ func TestListRemoteStateKeepsStashWatchlistOrderAndDistinctScenes(t *testing.T) 
 	}
 	if _, ok := resp.GetItems()[0].GetMedia().GetExternalIds()[capabilityID]; ok {
 		t.Fatal("Stash-only scene must not have a fabricated JAVBeacon release ID")
+	}
+}
+
+func TestApplyWatchedEventUsesProviderKeyAndStableSession(t *testing.T) {
+	occurredAt := time.Date(2026, 10, 2, 19, 41, 46, 0, time.UTC)
+	var got provider.PlaybackEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integrations/silo/playback" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode playback: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(provider.PlaybackResult{PlayCounted: true})
+	}))
+	defer server.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: server.URL, APIKey: "test-key"})
+	ws := &watchSyncServer{runtime: &runtimeServer{provider: p}}
+	event := &pluginv1.WatchSyncEvent{
+		EventId: "watched-1", Operation: pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_WATCHED,
+		Media: &pluginv1.WatchSyncMedia{MediaItemId: "local-item"}, ProviderItemKey: "stash:41307",
+		OccurredAt: timestamppb.New(occurredAt),
+	}
+	result := ws.applyOne(t.Context(), event)
+	if result.GetStatus() != pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED {
+		t.Fatalf("status = %v, fault = %+v", result.GetStatus(), result.GetFault())
+	}
+	if got.StashSceneID != "41307" || got.ReleaseID != 0 || got.SessionID != "watched-1" || got.Event != "stop" || !got.IsPlayed || !got.OccurredAt.Equal(occurredAt) {
+		t.Fatalf("forwarded playback = %+v", got)
+	}
+}
+
+func TestApplyWatchedEventAcceptsStashOnlyProviderID(t *testing.T) {
+	var got provider.PlaybackEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode playback: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(provider.PlaybackResult{PlayCounted: true})
+	}))
+	defer server.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: server.URL, APIKey: "test-key"})
+	ws := &watchSyncServer{runtime: &runtimeServer{provider: p}}
+	event := &pluginv1.WatchSyncEvent{
+		EventId: "watched-2", Operation: pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_WATCHED,
+		Media: &pluginv1.WatchSyncMedia{ExternalIds: map[string]string{"javbeacon": "stash:41307"}},
+	}
+	result := ws.applyOne(t.Context(), event)
+	if result.GetStatus() != pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED || got.StashSceneID != "41307" {
+		t.Fatalf("status=%v playback=%+v", result.GetStatus(), got)
 	}
 }

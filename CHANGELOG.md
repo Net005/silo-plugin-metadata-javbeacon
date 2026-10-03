@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.45] - 2026-10-03
+
+### Fixed
+
+- Forward watched events for Stash-only Silo matches when their scene ID is stored in the `javbeacon` provider ID or prior remote-state key. Use the event ID as a stable session fallback and preserve the source playback time.
+
 ## [0.4.44] - 2026-10-02
 
 ### Improved

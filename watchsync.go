@@ -85,6 +85,16 @@ func (s *watchSyncServer) applyOne(ctx context.Context, event *pluginv1.WatchSyn
 	externalIDs := event.GetMedia().GetExternalIds()
 	releaseID := releaseIDFromExternalIDs(externalIDs)
 	stashSceneID := externalIDs[stashSceneIDProviderKeyLower]
+	if stashSceneID == "" {
+		stashSceneID, _ = stashProviderID(externalIDs[capabilityID], nil)
+	}
+	if releaseID == 0 && stashSceneID == "" {
+		if sceneID, ok := stashProviderID(event.GetProviderItemKey(), nil); ok {
+			stashSceneID = sceneID
+		} else if n, err := strconv.ParseInt(event.GetProviderItemKey(), 10, 64); err == nil && n > 0 {
+			releaseID = n
+		}
+	}
 	if releaseID == 0 && stashSceneID == "" {
 		// Not a JAVBeacon-backed item at all (no javbeacon:// or stash:// id on
 		// this media) - nothing for us to forward. NO_CHANGE, not REJECTED:
@@ -126,6 +136,12 @@ func (s *watchSyncServer) applyOne(ctx context.Context, event *pluginv1.WatchSyn
 	}
 	if pb.SessionID == "" {
 		pb.SessionID = event.GetWatchHistoryId()
+	}
+	if pb.SessionID == "" {
+		pb.SessionID = event.GetEventId()
+	}
+	if occurredAt := event.GetOccurredAt(); occurredAt != nil && occurredAt.IsValid() {
+		pb.OccurredAt = occurredAt.AsTime()
 	}
 
 	if _, err := s.runtime.provider.ReportPlayback(ctx, pb); err != nil {
