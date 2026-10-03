@@ -222,3 +222,51 @@ func TestApplyWatchedEventAcceptsStashOnlyProviderID(t *testing.T) {
 		t.Fatalf("status=%v playback=%+v", result.GetStatus(), got)
 	}
 }
+
+// Silo's watch adapter sends a local media ID but filters custom provider IDs.
+// Resolve the exact item artwork before forwarding a completed play.
+func TestApplyWatchedEventResolvesLocalStashArtwork(t *testing.T) {
+	var got provider.PlaybackEvent
+	jav := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integrations/silo/playback" {
+			t.Fatalf("unexpected JAVBeacon path %q", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(provider.PlaybackResult{PlayCounted: true})
+	}))
+	defer jav.Close()
+	silo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/profiles":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]string{{"id": "profile-1"}}})
+		case "/api/v2/catalog/items/local-c93b10a21c5cfb4c67be6ebdf0b6":
+			if r.Header.Get("X-Profile-Id") != "profile-1" {
+				t.Fatalf("missing profile header")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content_id": "local-c93b10a21c5cfb4c67be6ebdf0b6",
+				"poster_url": "https://jav.example/api/v1/integrations/silo/stash/scenes/42936/poster?token=redacted",
+			})
+		default:
+			t.Fatalf("unexpected Silo path %q", r.URL.Path)
+		}
+	}))
+	defer silo.Close()
+	p := provider.NewProvider()
+	p.Configure(provider.Config{BaseURL: jav.URL, APIKey: "test-key"})
+	p.ConfigureSiloConnection(silo.URL, "", "silo-key")
+	ws := &watchSyncServer{runtime: &runtimeServer{provider: p}}
+	event := &pluginv1.WatchSyncEvent{
+		EventId: "history-1", Operation: pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_WATCHED,
+		Media: &pluginv1.WatchSyncMedia{MediaItemId: "local-c93b10a21c5cfb4c67be6ebdf0b6"},
+	}
+	result := ws.applyOne(t.Context(), event)
+	if result.GetStatus() != pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED {
+		t.Fatalf("status=%v fault=%+v", result.GetStatus(), result.GetFault())
+	}
+	if got.StashSceneID != "42936" || got.ReleaseID != 0 || got.SessionID != "history-1" || !got.IsPlayed {
+		t.Fatalf("forwarded playback = %+v", got)
+	}
+}

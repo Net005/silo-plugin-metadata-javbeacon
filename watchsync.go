@@ -95,9 +95,32 @@ func (s *watchSyncServer) applyOne(ctx context.Context, event *pluginv1.WatchSyn
 			releaseID = n
 		}
 	}
+	if releaseID == 0 && stashSceneID == "" && event.GetMedia().GetMediaItemId() != "" {
+		client := provider.NewSiloClient(s.runtime.provider.SiloBaseURL(), s.runtime.provider.SiloAPIKey())
+		if client.Configured() {
+			profileID, err := client.PrimaryProfileID(ctx)
+			if err == nil {
+				var poster, backdrop string
+				poster, backdrop, err = client.ItemArtwork(ctx, profileID, event.GetMedia().GetMediaItemId())
+				if err == nil {
+					stashSceneID = stashSceneFromArtwork(poster)
+					if stashSceneID == "" {
+						stashSceneID = stashSceneFromArtwork(backdrop)
+					}
+				}
+			}
+			if err != nil {
+				return &pluginv1.WatchSyncApplyResult{
+					EventId: event.GetEventId(),
+					Status:  pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_RETRY,
+					Fault:   &pluginv1.WatchSyncFault{Code: pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_TEMPORARY, SafeMessage: err.Error()},
+				}
+			}
+		}
+	}
 	if releaseID == 0 && stashSceneID == "" {
-		// Not a JAVBeacon-backed item at all (no javbeacon:// or stash:// id on
-		// this media) - nothing for us to forward. NO_CHANGE, not REJECTED:
+		// No JAVBeacon ID or scene-specific artwork on this exact local item.
+		// Nothing for us to forward. NO_CHANGE, not REJECTED:
 		// this is an expected, harmless mismatch, not a malformed event.
 		return &pluginv1.WatchSyncApplyResult{EventId: event.GetEventId(), Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE}
 	}

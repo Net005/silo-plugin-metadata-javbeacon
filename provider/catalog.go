@@ -105,6 +105,42 @@ func (c *SiloClient) ItemHasCast(ctx context.Context, profileID, contentID strin
 	return len(item.Cast) > 0, nil
 }
 
+// ItemArtwork reads an exact local catalog item. Silo watch events carry the
+// local ID but omit custom metadata-provider IDs from external_ids.
+func (c *SiloClient) ItemArtwork(ctx context.Context, profileID, contentID string) (string, string, error) {
+	if !c.Configured() || profileID == "" || contentID == "" {
+		return "", "", fmt.Errorf("silo: client, profile and content IDs are required")
+	}
+	path := "/api/v2/catalog/items/" + url.PathEscape(contentID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Profile-Id", profileID)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("silo: item detail HTTP %d", resp.StatusCode)
+	}
+	var item struct {
+		ContentID   string `json:"content_id"`
+		PosterURL   string `json:"poster_url"`
+		BackdropURL string `json:"backdrop_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return "", "", err
+	}
+	if item.ContentID != contentID {
+		return "", "", fmt.Errorf("silo: item detail ID mismatch")
+	}
+	return item.PosterURL, item.BackdropURL, nil
+}
+
 // PrimaryProfileID supplies the profile header required by item details.
 func (c *SiloClient) PrimaryProfileID(ctx context.Context) (string, error) {
 	var profiles struct {
