@@ -55,7 +55,7 @@ func (s *collectionSyncTaskServer) logger() hclog.Logger {
 }
 
 func canonicalTaskKey(key string) string {
-	for _, task := range []string{"collection-sync", "match-unmatched", "repair-matched", "metadata-refresh", "watched-sync"} {
+	for _, task := range []string{"collection-sync", "match-unmatched", "repair-matched", "metadata-refresh", "watched-sync", "play-backfill"} {
 		if key == task || strings.HasSuffix(key, ":"+task) {
 			return task
 		}
@@ -117,6 +117,8 @@ func (s *collectionSyncTaskServer) Run(ctx context.Context, req *pluginv1.RunSch
 		done, started = s.startMetadataSync()
 	case "watched-sync":
 		done, started = s.startWatchedSync()
+	case "play-backfill":
+		done, started = s.startPlayBackfill()
 	default:
 		done, started = s.startCollectionSync(true)
 	}

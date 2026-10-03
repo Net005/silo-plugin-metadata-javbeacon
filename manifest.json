@@ -105,6 +105,12 @@
       "id": "watched-sync",
       "display_name": "Import Stash watched state",
       "description": "Apply Stash playback history to local Silo items across movie libraries."
+    },
+    {
+      "type": "scheduled_task.v1",
+      "id": "play-backfill",
+      "display_name": "Backfill completed Silo plays",
+      "description": "Review finalized Silo playback sessions and add only proven missing Stash plays. Existing or ambiguous Stash history is never duplicated; partial attempts and O counts are ignored."
     }
   ],
   "global_config_schema": [
@@ -162,7 +168,7 @@
           {
             "key": "silo_api_key",
             "label": "Silo API Key",
-            "description": "An API key for this Silo server (Admin → Users → API Keys), used to manage collections and auto-match unmatched items.",
+            "description": "An API key for this Silo server (Admin \u2192 Users \u2192 API Keys), used to manage collections and auto-match unmatched items.",
             "control": "ADMIN_FORM_CONTROL_PASSWORD",
             "required": false,
             "secret": true
